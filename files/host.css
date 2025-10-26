@@ -1,2 +1,93 @@
-body { font-family: sans-serif; padding: 20px; }
-#access-link { background: #eee; padding: 10px; font-family: monospace; }
+body {
+    font-family: sans-serif;
+    padding: 20px;
+    background-color: #121212;
+    color: #e0e0e0;
+}
+
+h1, h3 {
+    color: #ffffff;
+}
+
+.link-container {
+    display: flex;
+    align-items: center;
+}
+
+#access-link {
+    background: #333;
+    padding: 10px;
+    font-family: monospace;
+    border-radius: 5px;
+    margin-right: 10px;
+}
+
+#copy-link-btn, #update-banners-btn {
+    background-color: #1f1f1f;
+    color: #e0e0e0;
+    border: 1px solid #333;
+    padding: 10px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+#copy-link-btn:hover, #update-banners-btn:hover {
+    background-color: #333;
+}
+
+.header-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+#breadcrumb {
+    margin-bottom: 15px;
+}
+
+#breadcrumb a {
+    color: #bb86fc;
+    text-decoration: none;
+}
+
+#breadcrumb a:hover {
+    text-decoration: underline;
+}
+
+.explorer {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 20px;
+}
+
+.file-item {
+    background-color: #1f1f1f;
+    border-radius: 5px;
+    padding: 10px;
+    cursor: pointer;
+    text-align: center;
+}
+
+.file-item:hover {
+    background-color: #333;
+}
+
+.file-item .banner {
+    width: 100%;
+    height: auto;
+    border-radius: 5px;
+    margin-bottom: 10px;
+}
+
+.file-item .file-name {
+    font-weight: bold;
+}
+
+a {
+    color: #bb86fc;
+}
+
+hr {
+    border-color: #333;
+}

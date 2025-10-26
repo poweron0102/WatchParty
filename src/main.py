@@ -2,8 +2,8 @@ import uvicorn
 
 from src.config import PORT, VIDEO_DIR
 from src.server_setup import socket_app
-import src.http_routes
-import src.socket_events
+import src.http_routes                     # Importante para importar as rotas
+import src.socket_events                   # Importante para importar as rotas
 
 
 if __name__ == "__main__":

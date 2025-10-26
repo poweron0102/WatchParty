@@ -9,12 +9,17 @@
     <h1>Painel do Host</h1>
 
     <h3>Link de Convite (Envie para seus amigos):</h3>
-    <p id="access-link">Carregando...</p>
+    <div class="link-container">
+        <p id="access-link">Carregando...</p>
+        <button id="copy-link-btn">Copiar Link</button>
+    </div>
 
-    <h3>Selecionar Vídeo:</h3>
-    <p>Os vídeos devem estar na pasta <strong>{{VIDEO_DIR}}</strong> configurada no servidor.</p>
-    <select id="video-list"></select>
-    <button id="set-video-btn">Carregar Vídeo para Todos</button>
+    <div class="header-container">
+        <h3>Selecionar Vídeo:</h3>
+        <button id="update-banners-btn">Atualizar Banners</button>
+    </div>
+    <div id="breadcrumb"></div>
+    <div id="file-browser" class="explorer"></div>
 
     <hr>
     <p><strong>Importante:</strong> Você também deve <a href="/party" target="_blank">entrar na página da sala</a> para ser o host e controlar o vídeo.</p>

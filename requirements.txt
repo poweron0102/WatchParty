@@ -4,3 +4,4 @@ python-socketio
 python-multipart
 requests
 aiofiles
+cinemagoer

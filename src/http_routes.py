@@ -1,6 +1,8 @@
 import os
 import mimetypes
 import fastapi
+import requests
+from imdb import Cinemagoer
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, JSONResponse
 from starlette.requests import Request
@@ -26,15 +28,19 @@ async def get_host_page():
 
 
 # 3. Endpoint de Streaming de Vídeo
-@app.get("/video/{video_name}")
-async def stream_video(video_name: str, request: Request):
-    video_path = os.path.join(VIDEO_DIR, video_name)
-    if not os.path.exists(video_path):
+@app.get("/video/{video_path:path}")
+async def stream_video(video_path: str, request: Request):
+    # Sanitize and validate path to prevent directory traversal
+    full_video_path = os.path.abspath(os.path.join(VIDEO_DIR, video_path))
+    if not full_video_path.startswith(os.path.abspath(VIDEO_DIR)):
+        return JSONResponse(status_code=403, content={"message": "Acesso negado"})
+
+    if not os.path.exists(full_video_path):
         return JSONResponse(status_code=404, content={"message": "Video não encontrado"})
 
-    media_type, _ = mimetypes.guess_type(video_path)
+    media_type, _ = mimetypes.guess_type(full_video_path)
     return FileResponse(
-        video_path,
+        full_video_path,
         media_type=media_type or "video/mp4",
         headers={"Accept-Ranges": "bytes"}
     )
@@ -51,13 +57,24 @@ async def upload_pfp(file: fastapi.UploadFile):
 
 
 @app.get("/api/get_videos")
-async def list_videos():
+async def list_videos(path: str = ""):
+    # Sanitize and validate path
+    current_path = os.path.abspath(os.path.join(VIDEO_DIR, path))
+    if not current_path.startswith(os.path.abspath(VIDEO_DIR)) or not os.path.isdir(current_path):
+        return JSONResponse(status_code=404, content={"message": "Caminho não encontrado"})
+
     try:
-        videos = [
-            f for f in os.listdir(VIDEO_DIR)
-            if f.lower().endswith((".mp4", ".mkv", ".webm", ".avi"))
-        ]
-        return {"videos": videos}
+        items = []
+        for item_name in sorted(os.listdir(current_path)):
+            item_path = os.path.join(current_path, item_name)
+            relative_item_path = os.path.join(path, item_name)
+
+            if os.path.isdir(item_path):
+                items.append({"name": item_name, "type": "folder", "path": relative_item_path})
+            elif item_name.lower().endswith((".mp4", ".mkv", ".webm", ".avi")):
+                items.append({"name": item_name, "type": "video", "path": relative_item_path})
+        
+        return {"items": items}
     except FileNotFoundError:
         return JSONResponse(status_code=500, content={"message": f"Diretório de vídeo não encontrado: {VIDEO_DIR}"})
 
@@ -69,6 +86,30 @@ async def get_ip_address():
     return {"ip": ip, "link": link}
 
 
-app.mount(f"/{CACHE_DIR}", StaticFiles(directory=CACHE_DIR), name="cache")
-app.mount("/", StaticFiles(directory=FILES_DIR, html=True), name="static")
+@app.post("/api/update_banners")
+async def update_banners():
+    ia = Cinemagoer()
+    updated_banners = []
+    for item_name in os.listdir(VIDEO_DIR):
+        item_path = os.path.join(VIDEO_DIR, item_name)
+        if os.path.isdir(item_path):
+            try:
+                movies = ia.search_movie(item_name)
+                if movies:
+                    movie_id = movies[0].movieID
+                    movie = ia.get_movie(movie_id)
+                    poster_url = movie.get('cover url')
+                    if poster_url:
+                        response = requests.get(poster_url)
+                        if response.status_code == 200:
+                            with open(os.path.join(item_path, "banner.png"), "wb") as f:
+                                f.write(response.content)
+                            updated_banners.append(item_name)
+            except Exception as e:
+                print(f"Erro ao processar {item_name}: {e}")
+    return {"message": f"Banners atualizados para: {', '.join(updated_banners)}"}
 
+
+app.mount(f"/{CACHE_DIR}", StaticFiles(directory=CACHE_DIR), name="cache")
+app.mount("/videos", StaticFiles(directory=VIDEO_DIR), name="videos") # Para servir os banners
+app.mount("/", StaticFiles(directory=FILES_DIR, html=True), name="static")
