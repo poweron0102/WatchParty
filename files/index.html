@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entrar na Sala</title>
+    <style>
+        body { font-family: sans-serif; display: grid; place-items: center; min-height: 90vh; }
+        form { border: 1px solid #ccc; padding: 20px; border-radius: 8px; }
+        div { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; }
+        input[type="text"], input[type="file"] { width: 300px; padding: 5px; }
+    </style>
+</head>
+<body>
+    <form id="login-form">
+        <h2>Entrar na Watch Party</h2>
+        <div>
+            <label for="name">Nome de Exibição:</label>
+            <input type="text" id="name" required>
+        </div>
+        <div>
+            <label for="pfp">Foto de Perfil (Opcional):</label>
+            <input type="file" id="pfp" accept="image/*">
+        </div>
+        <button type="submit">Entrar</button>
+    </form>
+
+    <script>
+        document.getElementById('login-form').onsubmit = async (e) => {
+            e.preventDefault();
+
+            const name = document.getElementById('name').value;
+            const pfpFile = document.getElementById('pfp').files[0];
+            let pfpUrl = '';
+
+            if (pfpFile) {
+                // 1. Faz upload da foto para o cache
+                const formData = new FormData();
+                formData.append('file', pfpFile);
+
+                try {
+                    const res = await fetch('/api/upload_pfp', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await res.json();
+                    pfpUrl = data.url; // Deverá ser algo como "/cache/foto.png"
+                } catch (err) {
+                    console.error("Falha no upload da foto", err);
+                }
+            }
+
+            // 2. Salva no sessionStorage para usar na próxima página
+            sessionStorage.setItem('userName', name);
+            sessionStorage.setItem('userPfp', pfpUrl);
+
+            // 3. Redireciona para a sala
+            window.location.href = '/party';
+        };
+    </script>
+</body>
+</html>

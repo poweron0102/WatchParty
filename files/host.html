@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Configuração do Host</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        #access-link { background: #eee; padding: 10px; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <h1>Painel do Host</h1>
+
+    <h3>Link de Convite (Envie para seus amigos):</h3>
+    <p id="access-link">Carregando...</p>
+
+    <h3>Selecionar Vídeo:</h3>
+    <p>Os vídeos devem estar na pasta <strong>{{VIDEO_DIR}}</strong> configurada no servidor.</p>
+    <select id="video-list"></select>
+    <button id="set-video-btn">Carregar Vídeo para Todos</button>
+
+    <hr>
+    <p><strong>Importante:</strong> Você também deve <a href="/party" target="_blank">entrar na página da sala</a> para ser o host e controlar o vídeo.</p>
+
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script>
+        // Esta página também se conecta ao socket para enviar o comando
+        const socket = io();
+
+        const linkEl = document.getElementById('access-link');
+        const videoList = document.getElementById('video-list');
+        const setVideoBtn = document.getElementById('set-video-btn');
+
+        // 1. Buscar o IP/Link do servidor
+        fetch('/api/get_ip')
+            .then(res => res.json())
+            .then(data => {
+                linkEl.textContent = data.link;
+            });
+
+        // 2. Buscar a lista de vídeos disponíveis
+        fetch('/api/get_videos')
+            .then(res => res.json())
+            .then(data => {
+                videoList.innerHTML = '';
+                if (data.videos.length === 0) {
+                     videoList.innerHTML = '<option disabled>Nenhum vídeo encontrado</option>';
+                     setVideoBtn.disabled = true;
+                } else {
+                    data.videos.forEach(video => {
+                        const option = document.createElement('option');
+                        option.value = video;
+                        option.textContent = video;
+                        videoList.appendChild(option);
+                    });
+                }
+            });
+
+        // 3. Enviar comando para trocar o vídeo de todos
+        setVideoBtn.onclick = () => {
+            const selectedVideo = videoList.value;
+            if (selectedVideo) {
+                // Envia o evento para o servidor
+                socket.emit('host_set_video', selectedVideo);
+                alert('Vídeo definido para todos os usuários!');
+            }
+        };
+    </script>
+</body>
+</html>
