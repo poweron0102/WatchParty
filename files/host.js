@@ -121,13 +121,37 @@ function createItemElement(item) {
     banner.className = 'banner';
     banner.alt = item.name;
 
+    const defaultFolderBanner = '/banner_folder.png';
+    const defaultVideoBanner = '/banner_video.png';
+
+    // Função para buscar banner via scraping no backend
+    const fetchBannerFromBackend = () => {
+        // Remove o ano do título (ex: "Filme (2023)") para melhorar a busca
+        const searchTerm = item.name.replace(/\s*\(\d{4}\)\s*$/, '').trim();
+
+        fetch(`/api/scrape_banner?title=${encodeURIComponent(searchTerm)}`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.imageUrl) {
+                    banner.src = data.imageUrl;
+                } else {
+                    console.log(`Banner para "${item.name}" não encontrado. Usando banner padrão.`);
+                    banner.src = item.type === 'folder' ? defaultFolderBanner : defaultVideoBanner;
+                }
+            })
+            .catch(error => {
+                console.error('Erro ao buscar banner via backend:', error);
+                banner.src = item.type === 'folder' ? defaultFolderBanner : defaultVideoBanner;
+            });
+    };
+
     if (item.type === 'folder') {
         banner.src = `/videos/${item.path}/banner.png?t=${new Date().getTime()}`;
-        banner.onerror = () => { banner.src = '/banner_folder.png'; };
+        banner.onerror = fetchBannerFromBackend;
     } else if (item.type === 'video') {
         const dirPath = item.path.substring(0, item.path.lastIndexOf('/'));
         banner.src = `/videos/${dirPath}/banner.png?t=${new Date().getTime()}`;
-        banner.onerror = () => { banner.src = '/banner_video.png'; };
+        banner.onerror = fetchBannerFromBackend;
     }
     itemEl.appendChild(banner);
     itemEl.appendChild(nameEl);

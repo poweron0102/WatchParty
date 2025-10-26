@@ -15,7 +15,7 @@ CACHE_DIR = "cache"
 FILES_DIR = "files"
 
 # Carrega configurações ou usa padrões
-config = {"port": 8000, "video_dir": "videos"}
+config = {"port": 8000, "video_dir": "videos", "auto_scrape": False}
 if os.path.exists(SAVE_FILE):
     try:
         with open(SAVE_FILE, 'r') as f:
@@ -25,6 +25,8 @@ if os.path.exists(SAVE_FILE):
 
 PORT = config["port"]
 VIDEO_DIR = config["video_dir"]
+AUTO_SCRAPE = config["auto_scrape"]
+
 if not os.path.isdir(VIDEO_DIR):
     print(f"Aviso: Diretório de vídeos '{VIDEO_DIR}' não encontrado. Saindo...")
     #os.makedirs(VIDEO_DIR, exist_ok=True)

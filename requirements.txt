@@ -5,3 +5,4 @@ python-multipart
 requests
 aiofiles
 cinemagoer
+beautifulsoup4
