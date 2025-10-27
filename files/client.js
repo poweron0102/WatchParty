@@ -8,6 +8,9 @@ const chatBox = document.getElementById('chat-box');
 const chatInput = document.getElementById('chat-input');
 const sendBtn = document.getElementById('send-btn');
 const userList = document.getElementById('user-list');
+const pingInfo = document.createElement('div'); // Criei o elemento para o ping
+pingInfo.id = 'ping-info';
+userList.parentNode.insertBefore(pingInfo, userList); // Adicionei antes da lista de usuários
 
 // --- Estado do Cliente ---
 let isHost = false;
@@ -77,11 +80,11 @@ socket.on('update_users', (users) => {
         }
 
         let hostBadge = '';
-        // O servidor precisa enviar quem é o host no 'users'
-        // (Modificação necessária no backend: `server_state["host_sid"]`)
-        // Por enquanto, vamos pular isso.
+        if (user.isHost) {
+            hostBadge = '<strong>[HOST]</strong>';
+        }
 
-        li.innerHTML = `${pfpImg} ${user.name}`;
+        li.innerHTML = `${pfpImg} ${user.name} ${hostBadge}`;
         userList.appendChild(li);
     }
 });
@@ -150,10 +153,12 @@ socket.on('force_sync', (data) => {
     if (isHost || isSyncing) return;
     
     // Calcula a latência (ping) da requisição
-    const latency = (Date.now() - syncRequestTime) / 2; // Tempo de ida
+    const ping = Date.now() - syncRequestTime;
+    pingInfo.textContent = `Ping: ${ping}ms`; // Mostra o ping na tela
+    const latency = ping / 2; // Tempo de ida
     const correctedTime = data.time + (latency / 1000); // Converte latência para segundos
 
-    console.log(`Sync forçado recebido. Tempo do Host: ${data.time.toFixed(2)}s, Ping: ${latency*2}ms, Tempo Corrigido: ${correctedTime.toFixed(2)}s`);
+    console.log(`Sync forçado recebido. Tempo do Host: ${data.time.toFixed(2)}s, Ping: ${ping}ms, Tempo Corrigido: ${correctedTime.toFixed(2)}s`);
 
     // Só ajusta se a diferença for maior que 2 segundos para evitar "pulos"
     if (Math.abs(video.currentTime - correctedTime) > 2) {

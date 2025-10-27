@@ -17,6 +17,7 @@ async def join_room(sid, data):
     # O primeiro a entrar é o host
     if server_state["host_sid"] is None:
         server_state["host_sid"] = sid
+        server_state["users"][sid]["isHost"] = True
         await sio.emit('set_host', to=sid)  # Avisa o cliente que ele é o host
 
     # Envia a lista de usuários atualizada para todos
