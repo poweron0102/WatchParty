@@ -1,6 +1,7 @@
 import os
 import mimetypes
 import fastapi
+import hashlib
 import cv2
 import random
 import requests
@@ -91,20 +92,22 @@ async def stream_video(video_path: str, request: Request):
 
 @app.post("/api/upload_image")
 async def upload_image(file: fastapi.UploadFile):
-    filename = os.path.basename(file.filename or "upload")
-    name, ext = os.path.splitext(filename)
-    saved_filename = filename
-    dest_path = os.path.join(CACHE_DIR, saved_filename)
-    i = 1
-    while os.path.exists(dest_path):
-        saved_filename = f"{name}_{i}{ext}"
-        dest_path = os.path.join(CACHE_DIR, saved_filename)
-        i += 1
+    contents = await file.read()
+
+    file_hash = hashlib.sha256(contents).hexdigest()
+    _, ext = os.path.splitext(file.filename or "")
+
+    hashed_filename = f"{file_hash}{ext}"
+    dest_path = os.path.join(CACHE_DIR, hashed_filename)
+
     os.makedirs(CACHE_DIR, exist_ok=True)
-    with open(dest_path, "wb") as buffer:
-        buffer.write(await file.read())
-    print(f"Imagem salva em {dest_path}")
-    return {"url": f"/{CACHE_DIR}/{saved_filename}"}
+    
+    if not os.path.exists(dest_path):
+        with open(dest_path, "wb") as buffer:
+            buffer.write(contents)
+        print(f"Imagem salva em {dest_path}")
+        
+    return {"url": f"/{CACHE_DIR}/{hashed_filename}"}
 
 
 @app.get("/api/get_videos")
