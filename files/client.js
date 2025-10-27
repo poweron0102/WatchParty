@@ -31,14 +31,14 @@ if (!userName) {
 socket.emit('join_room', { name: userName, pfp: userPfp });
 
 // --- Funções de Chat ---
-function sendMessage() {
-    const text = chatInput.value;
-    if (text.trim()) {
-        socket.emit('send_message', text);
+function sendMessage(text) {
+    const message = text || chatInput.value;
+    if (message.trim()) {
+        socket.emit('send_message', message);
         chatInput.value = '';
     }
 }
-sendBtn.onclick = sendMessage;
+sendBtn.onclick = () => sendMessage();
 chatInput.onkeydown = (e) => {
     if (e.key === 'Enter') sendMessage();
 };
@@ -57,6 +57,64 @@ function addChatMessage(data) {
     chatBox.appendChild(msg);
     chatBox.scrollTop = chatBox.scrollHeight;
 }
+
+// --- Upload de Imagem ---
+async function handleImageUpload(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const response = await fetch('/api/upload_image', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error(`Upload failed: ${response.status} ${response.statusText}`);
+        }
+
+        const image = await response.json();
+        if (!image || !image.url) {
+            throw new Error('Resposta inválida do servidor');
+        }
+
+        const imgTag = `<img src="${image.url}" style="width:100%;height:100%;object-fit:cover;display:block; border-radius: 1rem;">`;
+        sendMessage(imgTag);
+    } catch (error) {
+        console.error('Erro ao enviar imagem:', error);
+        addChatMessage({
+            sender: 'System',
+            text: 'Erro ao enviar imagem.'
+        });
+    }
+}
+
+chatInput.addEventListener('paste', (e) => {
+    const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+    for (const item of items) {
+        if (item.type.indexOf('image') !== -1) {
+            const blob = item.getAsFile();
+            handleImageUpload(blob);
+            e.preventDefault();
+        }
+    }
+});
+
+chatInput.addEventListener('dragover', (e) => {
+    e.preventDefault();
+});
+
+chatInput.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const files = (e.dataTransfer || e.originalEvent.dataTransfer).files;
+    if (files.length > 0) {
+        const file = files[0];
+        if (file.type.indexOf('image') !== -1) {
+            handleImageUpload(file).then(r => {});
+        }
+    }
+});
+
 
 // --- Listeners de Eventos do Socket.IO ---
 
