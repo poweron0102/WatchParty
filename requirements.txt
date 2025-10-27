@@ -6,3 +6,4 @@ requests
 aiofiles
 cinemagoer
 beautifulsoup4
+opencv-python

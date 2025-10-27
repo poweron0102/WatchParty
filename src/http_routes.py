@@ -1,6 +1,7 @@
 import os
 import mimetypes
 import fastapi
+import cv2
 import random
 import requests
 from bs4 import BeautifulSoup
@@ -49,60 +50,6 @@ def _fetch_imdb_poster_url(title: str) -> str | None:
             return _get_high_res_imdb_url(image_tag['src'])
     except Exception as e:
         print(f"Erro ao buscar pôster para '{title}': {e}")
-    return None
-
-
-ResultCache: dict[int, list[str]] = {}
-headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-def _fetch_imdb_preview_image_url(title: str) -> str | None:
-    """
-    Busca um título no IMDb, faz scraping da página e retorna a URL de uma
-    imagem de pré-visualização retangular aleatória.
-    """
-    try:
-        print(f"Buscando imagem de pré-visualização no IMDb para '{title}'...")
-        ia = Cinemagoer()
-        movies = ia.search_movie(title)
-
-        if not movies:
-            print(f"Nenhum resultado encontrado no IMDb para '{title}'.")
-            return None
-
-        first_result_id = movies[0].movieID
-        if first_result_id in ResultCache:
-            return random.choice(ResultCache[first_result_id])
-
-        ResultCache[first_result_id] = []
-        movie_page_url = f"https://www.imdb.com/pt/title/tt{first_result_id}/mediaviewer/"
-
-        img_ids: set[str] = set()
-        while len(img_ids) < 30:
-            print(movie_page_url)
-            response = requests.get(movie_page_url, headers=headers)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
-            image_tags = soup.select('img[src][data-image-id]')
-            next_img_id: str = None
-
-            if image_tags:
-                for tag in image_tags:
-                    image_id = tag.get("data-image-id")
-                    if "curr" in image_id.split('-'):
-                        img_ids.add(image_id.split('-')[0])
-                        ResultCache[first_result_id].append(_get_high_res_imdb_url(tag['src']))
-                    else:
-                        img_id = image_id.split('-')[0]
-                        if img_id not in img_ids:
-                            next_img_id = img_id
-                            break
-
-            if next_img_id:
-                movie_page_url = f"https://www.imdb.com/pt/title/tt{first_result_id}/mediaviewer/{next_img_id}/"
-            else:
-                break
-        return random.choice(ResultCache[first_result_id])
-    except Exception as e:
-        print(f"Erro ao buscar imagem de pré-visualização para '{title}': {e}")
     return None
 
 # 1. Servir páginas principais
@@ -195,48 +142,70 @@ async def get_ip_address():
 
 @app.post("/api/update_banners")
 async def update_banners():
+    """
+    Percorre recursivamente o diretório de vídeos, buscando pôsteres para pastas (séries)
+    e gerando thumbnails para arquivos de vídeo.
+    Salva as imagens em uma subpasta '.previews'.
+    """
     updated_banners = []
-    # Ignora arquivos/pastas que começam com '.'
-    dir_items = [item for item in os.listdir(VIDEO_DIR) if not item.startswith('.')]
 
-    for item_name in dir_items:
-        item_path = os.path.join(VIDEO_DIR, item_name)
-        title_to_search = item_name
+    for root, dirs, files in os.walk(VIDEO_DIR):
+        # Ignora pastas .previews e outras pastas ocultas
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
 
-        if os.path.isdir(item_path):
-            preview_dir = os.path.join(item_path, ".previews")
+        # 1. Processa pastas (para séries/temporadas)
+        # Apenas processa a pasta se ela não for a raiz de vídeos
+        if root != VIDEO_DIR:
+            dir_name = os.path.basename(root)
+            preview_dir = os.path.join(root, ".previews")
             banner_path = os.path.join(preview_dir, "banner.png")
-            if os.path.exists(banner_path):
-                #continue todo para apagar a bissarrice atual
-                pass
-            os.makedirs(preview_dir, exist_ok=True)
-            image_url = _fetch_imdb_poster_url(title_to_search)
 
-        elif os.path.isfile(item_path): # é um arquivo de vídeo
-            base_name, ext = os.path.splitext(item_name)
-            if ext.lower() not in [".mp4", ".mkv", ".webm", ".avi"]:
-                #continue todo
-                pass
-            title_to_search = base_name
-            preview_dir = os.path.join(VIDEO_DIR, ".previews")
+            if not os.path.exists(banner_path):
+                os.makedirs(preview_dir, exist_ok=True)
+                image_url = _fetch_imdb_poster_url(dir_name)
+                if image_url:
+                    try:
+                        image_response = requests.get(image_url)
+                        image_response.raise_for_status()
+                        with open(banner_path, "wb") as f:
+                            f.write(image_response.content)
+                        updated_banners.append(dir_name)
+                    except Exception as e:
+                        print(f"Erro ao baixar o banner para {dir_name}: {e}")
+
+        # 2. Processa arquivos de vídeo
+        for filename in files:
+            if not filename.lower().endswith((".mp4", ".mkv", ".webm", ".avi")):
+                continue
+
+            base_name, _ = os.path.splitext(filename)
+            video_path = os.path.join(root, filename)
+            preview_dir = os.path.join(root, ".previews")
             banner_path = os.path.join(preview_dir, f"{base_name}_banner.png")
+
             if os.path.exists(banner_path):
                 continue
+
             os.makedirs(preview_dir, exist_ok=True)
-            image_url = _fetch_imdb_preview_image_url(title_to_search)
-
-        else:
-            continue
-
-        if image_url and banner_path:
             try:
-                image_response = requests.get(image_url)
-                image_response.raise_for_status()
-                with open(banner_path, "wb") as f:
-                    f.write(image_response.content)
-                updated_banners.append(title_to_search)
+                print(f"Gerando thumbnail para o vídeo '{filename}'...")
+                cap = cv2.VideoCapture(video_path)
+                if not cap.isOpened():
+                    print(f"Erro ao abrir o vídeo {filename}")
+                    continue
+
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                # Captura um frame entre 10% e 70% do vídeo
+                random_frame_number = random.randint(int(total_frames * 0.1), int(total_frames * 0.7))
+                cap.set(cv2.CAP_PROP_POS_FRAMES, random_frame_number)
+
+                success, frame = cap.read()
+                if success:
+                    cv2.imwrite(banner_path, frame)
+                    updated_banners.append(base_name)
+                cap.release()
             except Exception as e:
-                print(f"Erro ao baixar o banner para {title_to_search}: {e}")
+                print(f"Erro ao gerar thumbnail para {base_name}: {e}")
 
     return {"message": f"Banners atualizados para: {', '.join(updated_banners)}"}
 
