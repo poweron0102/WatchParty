@@ -146,11 +146,13 @@ function createItemElement(item) {
     };
 
     if (item.type === 'folder') {
-        banner.src = `/videos/${item.path}/banner.png?t=${new Date().getTime()}`;
+        // O backend salva em: /path/to/folder/.previews/banner.png
+        banner.src = `/videos/${item.path}/.previews/banner.png?t=${new Date().getTime()}`;
         banner.onerror = fetchBannerFromBackend;
     } else if (item.type === 'video') {
-        const dirPath = item.path.substring(0, item.path.lastIndexOf('/'));
-        banner.src = `/videos/${dirPath}/banner.png?t=${new Date().getTime()}`;
+        // O backend salva em: /.previews/video_name_banner.png
+        const baseName = item.name.substring(0, item.name.lastIndexOf('.'));
+        banner.src = `/videos/.previews/${baseName}_banner.png?t=${new Date().getTime()}`;
         banner.onerror = fetchBannerFromBackend;
     }
     itemEl.appendChild(banner);
