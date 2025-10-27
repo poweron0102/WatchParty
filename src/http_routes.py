@@ -87,12 +87,22 @@ async def stream_video(video_path: str, request: Request):
 
 # 4. Endpoints de API
 
-@app.post("/api/upload_pfp")
-async def upload_pfp(file: fastapi.UploadFile):
-    file_path = os.path.join(CACHE_DIR, file.filename)
-    with open(file_path, "wb") as buffer:
+@app.post("/api/upload_image")
+async def upload_image(file: fastapi.UploadFile):
+    filename = os.path.basename(file.filename or "upload")
+    name, ext = os.path.splitext(filename)
+    saved_filename = filename
+    dest_path = os.path.join(CACHE_DIR, saved_filename)
+    i = 1
+    while os.path.exists(dest_path):
+        saved_filename = f"{name}_{i}{ext}"
+        dest_path = os.path.join(CACHE_DIR, saved_filename)
+        i += 1
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    with open(dest_path, "wb") as buffer:
         buffer.write(await file.read())
-    return {"url": f"/{CACHE_DIR}/{file.filename}"}
+    print(f"Imagem salva em {dest_path}")
+    return {"url": f"/{CACHE_DIR}/{saved_filename}"}
 
 
 @app.get("/api/get_videos")

@@ -11,7 +11,7 @@ document.getElementById('login-form').onsubmit = async (e) => {
         formData.append('file', pfpFile);
 
         try {
-            const res = await fetch('/api/upload_pfp', {
+            const res = await fetch('/api/upload_image', {
                 method: 'POST',
                 body: formData
             });
