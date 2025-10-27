@@ -64,7 +64,6 @@ async def send_message(sid, message_text):
 
 @sio.on("host_set_video")
 async def set_video(sid, video_name):
-    # Esta função agora é "confiável" e pode ser chamada pela página /host
     print(f"Host ou painel de host definiu o vídeo para: {video_name}")
     server_state["current_video"] = video_name
     server_state["current_time"] = 0

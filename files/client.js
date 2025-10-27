@@ -91,12 +91,10 @@ socket.on('new_message', (data) => {
 });
 
 socket.on('sync_state', (state) => {
-    // Evento recebido apenas ao entrar na sala
-    // state = { video, time, paused }
     console.log({state});
     if (state.video) {
         console.log(`Sincronizando com estado: ${state.video} @ ${state.time}s`);
-        isSyncing = true; // Ativa a flag
+        isSyncing = true;
         video.src = `/video/${state.video}`;
         video.currentTime = state.time;
         if (state.paused) {
@@ -110,9 +108,10 @@ socket.on('sync_state', (state) => {
 });
 
 socket.on('sync_event', (data) => {
-    // Não faz nada se for o host (host só envia)
-    if (isHost) return;
-
+    // O host não deve reagir aos seus próprios eventos de play/pause/seek
+    if (isHost && ['play', 'pause', 'seek'].includes(data.type)) {
+        return;
+    }
     console.log('Recebido evento de sync:', data);
 
     // Ativa a flag para impedir que este evento dispare um novo evento de 'play/pause/seek'
@@ -193,8 +192,6 @@ video.onplay = () => {
         return;
     }
 
-    // Se não for o host, inicia um intervalo para pedir o tempo do host
-    // periodicamente, evitando que o cliente saia de sincronia.
     if (!isHost) {
         if (syncInterval) clearInterval(syncInterval);
         syncInterval = setInterval(() => {
