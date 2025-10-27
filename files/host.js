@@ -8,6 +8,11 @@ const breadcrumb = document.getElementById('breadcrumb');
 
 let currentPath = '';
 
+function max(a, b) {
+    if (a > b) return a;
+    return b;
+}
+
 // 1. Buscar o IP/Link do servidor
 fetch('/api/get_ip')
     .then(res => res.json())
@@ -150,9 +155,11 @@ function createItemElement(item) {
         banner.src = `/videos/${item.path}/.previews/banner.png?t=${new Date().getTime()}`;
         banner.onerror = fetchBannerFromBackend;
     } else if (item.type === 'video') {
-        // O backend salva em: /.previews/video_name_banner.png
+        const lastSlashIndex = max(item.path.lastIndexOf('/'), item.path.lastIndexOf('\\'));
+        const dirPath = lastSlashIndex === -1 ? '' : item.path.substring(0, lastSlashIndex);
         const baseName = item.name.substring(0, item.name.lastIndexOf('.'));
-        banner.src = `/videos/.previews/${baseName}_banner.png?t=${new Date().getTime()}`;
+
+        banner.src = `/videos/${dirPath ? dirPath + '/' : ''}.previews/${baseName}_banner.png?t=${new Date().getTime()}`;
         banner.onerror = fetchBannerFromBackend;
     }
     itemEl.appendChild(banner);
