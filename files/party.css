@@ -109,3 +109,85 @@ video {
 
 .user-item img, .chat-msg img { width: 24px; height: 24px; border-radius: 50%; vertical-align: middle; margin-right: 8px; }
 #host-badge { background: var(--host-badge-bg); color: var(--host-badge-text); font-size: 0.7em; font-weight: bold; padding: 2px 5px; border-radius: 4px; margin-left: 5px; }
+
+/* --- Sistema de Notificações --- */
+#notification-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 2147483647; /* Valor máximo para ficar sobre o vídeo em tela cheia */
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 10px;
+    pointer-events: none; /* Permite clicar através do container */
+}
+
+.notification {
+    background-color: rgba(44, 44, 44, 0.9);
+    color: var(--text-primary);
+    padding: 12px 18px;
+    border-radius: 8px;
+    border-left: 4px solid var(--accent-color);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(5px);
+    max-width: 320px;
+    pointer-events: auto; /* Habilita eventos no próprio popup */
+    animation: slideInRight 0.4s ease-out, fadeOut 0.5s ease-in 4.5s forwards;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.notification.info {
+    border-left-color: var(--accent-color);
+}
+
+.notification.success {
+    border-left-color: #28a745;
+}
+
+.notification.warning {
+    border-left-color: var(--host-badge-bg);
+}
+
+.notification-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.notification-content {
+    font-size: 0.9em;
+    line-height: 1.4;
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(120%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+    }
+    to {
+        opacity: 0;
+        transform: translateX(20px);
+        height: 0;
+        padding-top: 0;
+        padding-bottom: 0;
+        margin-top: 0;
+        margin-bottom: 0;
+        border-width: 0;
+    }
+}
+
+
+
