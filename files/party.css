@@ -189,5 +189,19 @@ video {
     }
 }
 
+/* --- Estilos para o Player Plyr --- */
+:root {
+    --plyr-color-main: var(--accent-color);
+    --plyr-video-background: #000000;
+    --plyr-control-radius: 5px;
+    --plyr-font-family: 'Inter', sans-serif;
+}
 
+.plyr--video .plyr__controls {
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.7), transparent);
+    padding-top: 20px;
+}
 
+.plyr__menu__container .plyr__control {
+    color: var(--bg-primary);
+}

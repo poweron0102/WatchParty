@@ -2,8 +2,11 @@
 
 // --- Conexão e Elementos DOM ---
 const socket = io();
-
-const video = document.getElementById('player');
+// Inicializa o Plyr. Ele substitui o elemento <video> padrão por um mais robusto.
+const player = new Plyr('#player', {
+    tooltips: { controls: true, seek: true }
+});
+const video = player.media; // Acesso ao elemento <video> original, se necessário
 const chatBox = document.getElementById('chat-box');
 const chatInput = document.getElementById('chat-input');
 const sendBtn = document.getElementById('send-btn');
@@ -225,14 +228,19 @@ socket.on('sync_state', (state) => {
     if (state.video) {
         console.log(`Sincronizando com estado: ${state.video} @ ${state.time}s`);
         isSyncing = true;
-        video.src = `/video/${state.video}`;
-        video.currentTime = state.time;
+        // Usa a API do Plyr para mudar a fonte do vídeo
+        player.source = {
+            type: 'video',
+            sources: [{ src: `/video/${state.video}` }],
+        };
+        player.currentTime = state.time;
         if (state.paused) {
-            video.pause();
+            player.pause();
         } else {
-            video.play();
+            // O play() pode falhar se o usuário não interagiu com a página ainda.
+            player.play().catch(() => console.warn('Autoplay bloqueado pelo navegador.'));
         }
-        // Desativa a flag após um tempo para permitir o player "assentar"
+        // Desativa a flag após um tempo para permitir o player "assentar" no novo estado
         setTimeout(() => { isSyncing = false; }, 1000);
     }
 });
@@ -250,20 +258,23 @@ socket.on('sync_event', (data) => {
     try {
         switch(data.type) {
             case 'set_video':
-                video.src = `/video/${data.video}`;
-                video.pause();
-                video.currentTime = 0;
+                player.source = {
+                    type: 'video',
+                    sources: [{ src: `/video/${data.video}` }],
+                };
+                player.pause();
+                player.currentTime = 0;
                 break;
             case 'play':
-                video.play();
+                player.play();
                 break;
             case 'pause':
-                video.pause();
+                player.pause();
                 break;
             case 'seek':
                 // Só busca se a diferença for significativa (evita micro-ajustes)
-                if (Math.abs(video.currentTime - data.time) > 1.5) {
-                    video.currentTime = data.time;
+                if (Math.abs(player.currentTime - data.time) > 1.5) {
+                    player.currentTime = data.time;
                 }
                 break;
         }
@@ -278,7 +289,7 @@ socket.on('sync_event', (data) => {
 // Evento para corrigir o tempo do cliente caso ele saia de sincronia
 socket.on('force_sync', (data) => {
     if (isHost || isSyncing) return;
-    
+
     // Calcula a latência (ping) da requisição
     const ping = Date.now() - syncRequestTime;
     pingInfo.textContent = `Ping: ${ping}ms`; // Mostra o ping na tela
@@ -288,15 +299,15 @@ socket.on('force_sync', (data) => {
     console.log(`Sync forçado recebido. Tempo do Host: ${data.time.toFixed(2)}s, Ping: ${ping}ms, Tempo Corrigido: ${correctedTime.toFixed(2)}s`);
 
     // Só ajusta se a diferença for maior que 2 segundos para evitar "pulos"
-    if (Math.abs(video.currentTime - correctedTime) > 2) {
-        console.log(`Corrigindo tempo do vídeo de ${video.currentTime.toFixed(2)}s para ${correctedTime.toFixed(2)}s.`);
+    if (Math.abs(player.currentTime - correctedTime) > 2) {
+        console.log(`Corrigindo tempo do vídeo de ${player.currentTime.toFixed(2)}s para ${correctedTime.toFixed(2)}s.`);
         isSyncing = true;
-        video.currentTime = correctedTime;
+        player.currentTime = correctedTime;
         // Garante que o estado de play/pause também seja sincronizado
-        if (data.paused && !video.paused) {
-            video.pause();
-        } else if (!data.paused && video.paused) {
-            video.play();
+        if (data.paused && !player.paused) {
+            player.pause();
+        } else if (!data.paused && player.paused) {
+            player.play();
         }
         setTimeout(() => { isSyncing = false; }, 500);
     }
@@ -308,8 +319,8 @@ socket.on('force_sync', (data) => {
 socket.on('get_host_time', (callback) => {
     if (isHost) {
         callback({
-            time: video.currentTime,
-            paused: video.paused
+            time: player.currentTime,
+            paused: player.paused
         });
     }
 });
@@ -317,30 +328,30 @@ socket.on('get_host_time', (callback) => {
 
 // --- Listeners de Eventos do Player ---
 
-video.onplay = () => {
+player.on('play', () => {
     if (isHost && !isSyncing) {
         console.log("Host deu Play");
-        socket.emit('host_sync', { type: 'play', time: video.currentTime });
+        socket.emit('host_sync', { type: 'play', time: player.currentTime });
         return;
     }
 
     if (!isHost) {
         if (syncInterval) clearInterval(syncInterval);
         syncInterval = setInterval(() => {
-            // Só pede o sync se o vídeo estiver de fato tocando
-            if (!video.paused) {
+            // Só pede o sync se o vídeo estiver de fato tocando (não pausado)
+            if (!player.paused) {
                 console.log("Cliente pedindo sync de tempo...");
                 syncRequestTime = Date.now(); // Guarda o tempo do envio
                 socket.emit('request_sync');
             }
         }, 3000); // A cada 3 segundos
     }
-};
+});
 
-video.onpause = () => {
+player.on('pause', () => {
     if (isHost && !isSyncing) {
         console.log("Host deu Pause");
-        socket.emit('host_sync', { type: 'pause', time: video.currentTime });
+        socket.emit('host_sync', { type: 'pause', time: player.currentTime });
         return;
     }
 
@@ -351,11 +362,11 @@ video.onpause = () => {
             syncInterval = null;
         }
     }
-};
+});
 
-video.onseeked = () => {
+player.on('seeked', () => {
     if (isHost && !isSyncing) {
         console.log("Host buscou (Seek)");
-        socket.emit('host_sync', { type: 'seek', time: video.currentTime });
+        socket.emit('host_sync', { type: 'seek', time: player.currentTime });
     }
-};
+});
