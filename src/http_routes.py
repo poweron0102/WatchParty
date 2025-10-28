@@ -10,9 +10,9 @@ from imdb import Cinemagoer
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, JSONResponse
 from starlette.requests import Request
-from src.config import FILES_DIR, CACHE_DIR, VIDEO_DIR, PORT, AUTO_SCRAPE
-from src.server_setup import app
-from src.utils import get_public_ip
+from config import FILES_DIR, CACHE_DIR, VIDEO_DIR, PORT, AUTO_SCRAPE
+from server_setup import app
+from utils import get_public_ip
 
 def _get_high_res_imdb_url(url: str) -> str:
     """
@@ -47,8 +47,8 @@ def _fetch_imdb_poster_url(title: str) -> str | None:
 
         soup = BeautifulSoup(response.text, 'html.parser')
         image_tag = soup.select_one('div[data-testid="hero-media__poster"] img')
-        if image_tag and image_tag.get('src'):
-            return _get_high_res_imdb_url(image_tag['src'])
+        if image_tag and image_tag.get(''):
+            return _get_high_res_imdb_url(image_tag[''])
     except Exception as e:
         print(f"Erro ao buscar pôster para '{title}': {e}")
     return None

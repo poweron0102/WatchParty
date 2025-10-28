@@ -1,7 +1,7 @@
 # /src/socket_events.py
 
-from src.server_setup import sio
-from src.state import server_state
+from server_setup import sio
+from state import server_state
 
 
 @sio.event
