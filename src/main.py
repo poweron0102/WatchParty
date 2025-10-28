@@ -11,4 +11,4 @@ if __name__ == "__main__":
     print(f"Configurações: Porta={PORT}, Diretório de Vídeos={VIDEO_DIR}")
     print(f"Para configurar, acesse: http://localhost:{PORT}/host")
 
-    uvicorn.run(socket_app, host="::", port=PORT)
+    uvicorn.run(socket_app, host="::", port=PORT, log_level="error")

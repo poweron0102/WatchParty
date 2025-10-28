@@ -47,8 +47,9 @@ def _fetch_imdb_poster_url(title: str) -> str | None:
 
         soup = BeautifulSoup(response.text, 'html.parser')
         image_tag = soup.select_one('div[data-testid="hero-media__poster"] img')
-        if image_tag and image_tag.get(''):
-            return _get_high_res_imdb_url(image_tag[''])
+        print(f"Img tag encontrada: {image_tag}")
+        if image_tag and image_tag.get('src'):
+            return _get_high_res_imdb_url(image_tag['src'])
     except Exception as e:
         print(f"Erro ao buscar pôster para '{title}': {e}")
     return None
