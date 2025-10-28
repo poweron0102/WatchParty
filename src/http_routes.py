@@ -29,30 +29,49 @@ def _fetch_imdb_poster_url(title: str) -> str | None:
     Busca um título no IMDb, faz scraping da página do resultado principal
     e retorna a URL do pôster em alta resolução.
     """
-    try:
-        print(f"Buscando imagem no IMDb para '{title}'...")
-        ia = Cinemagoer()
-        movies = ia.search_movie(title)
+    print(f"Buscando imagem no IMDb para '{title}'...")
+    ia = Cinemagoer()
+    movies = ia.search_movie(title)
 
-        if not movies:
-            print(f"Nenhum resultado encontrado no IMDb para '{title}'.")
-            return None
+    if not movies:
+        print(f"Nenhum resultado encontrado no IMDb para '{title}'.")
+        return None
 
-        first_result_id = movies[0].movieID
-        movie_page_url = f"https://www.imdb.com/title/tt{first_result_id}/"
+    first_result_id = movies[0].movieID
+    movie_page_url = f"https://www.imdb.com/title/tt{first_result_id}/"
 
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-        response = requests.get(movie_page_url, headers=headers)
-        response.raise_for_status()
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+    response = requests.get(movie_page_url, headers=headers)
+    response.raise_for_status()
 
-        soup = BeautifulSoup(response.text, 'html.parser')
-        image_tag = soup.select_one('div[data-testid="hero-media__poster"] img')
-        print(f"Img tag encontrada: {image_tag}")
-        if image_tag and image_tag.get('src'):
+    soup = BeautifulSoup(response.text, 'html.parser')
+    image_tag = soup.select_one('div[data-testid="hero-media__poster"] img')
+    if image_tag:
+        # Prioriza o srcset para obter a melhor resolução
+        if image_tag.get('srcset'):
+            srcset = image_tag['srcset']
+            # url1 1000w, url2 1500w, ...
+            sources = [s.strip() for s in srcset.split(',')]
+
+            valid_sources = []
+            link: str = ""
+            size: int = 0
+
+            for name in sources:
+                if name.startswith("https://"):
+                    link = name
+                    continue
+                elif name.endswith("w"):
+                    size = int(name[name.find(" "):-1])
+                    valid_sources.append((link, size))
+
+            best_source_url = max(valid_sources, key=lambda item: item[1])[0]
+            return _get_high_res_imdb_url(best_source_url)
+
+        if image_tag.get('src'):
             return _get_high_res_imdb_url(image_tag['src'])
-    except Exception as e:
-        print(f"Erro ao buscar pôster para '{title}': {e}")
     return None
+
 
 # 1. Servir páginas principais
 @app.get("/")
