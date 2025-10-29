@@ -156,6 +156,44 @@ async def list_videos(path: str = ""):
         return JSONResponse(status_code=500, content={"message": f"Diretório de vídeo não encontrado: {VIDEO_DIR}"})
 
 
+@app.get("/api/get_subtitles/{video_path:path}")
+async def get_subtitles(video_path: str):
+    """
+    Encontra os arquivos de legenda (.vtt) para um determinado vídeo.
+    """
+    # Sanitize and validate path
+    full_video_path = os.path.abspath(os.path.join(VIDEO_DIR, video_path))
+    if not full_video_path.startswith(os.path.abspath(VIDEO_DIR)) or not os.path.isfile(full_video_path):
+        return JSONResponse(status_code=404, content={"message": "Vídeo não encontrado"})
+
+    video_dir = os.path.dirname(full_video_path)
+    subs_dir = os.path.join(video_dir, ".subs")
+
+    if not os.path.isdir(subs_dir):
+        return {"subtitles": []}
+
+    video_base_name = os.path.splitext(os.path.basename(full_video_path))[0]
+    subtitles = []
+    for filename in os.listdir(subs_dir):
+        # Garante que o arquivo de legenda pertence ao vídeo solicitado
+        if filename.lower().endswith(".vtt") and filename.startswith(video_base_name):
+            # O nome do arquivo é algo como: "NomeVideo.track_0.pt.vtt"
+            parts = os.path.splitext(filename)[0].split('.')
+            lang_code = "pt"  # Default
+            if len(parts) > 2:
+                lang_code = parts[-1] if len(parts[-1]) == 2 else parts[-2]
+
+            # O Plyr precisa de um caminho relativo que o servidor entenda.
+            # Usaremos o mount '/videos' que aponta para VIDEO_DIR.
+            relative_video_dir = os.path.dirname(video_path)
+            subtitle_src = os.path.join("/videos", relative_video_dir, ".subs", filename).replace("\\", "/")
+
+            subtitles.append({"lang": lang_code, "label": lang_code.upper(), "src": subtitle_src})
+
+    for s in subtitles: print(s)
+    return {"subtitles": subtitles}
+
+
 @app.get("/api/get_ip")
 async def get_ip_address():
     ip = get_public_ip()

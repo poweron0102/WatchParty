@@ -223,16 +223,34 @@ socket.on('new_message', (data) => {
     addChatMessage(data);
 });
 
+async function loadSubtitles(videoPath) {
+    try {
+        const response = await fetch(`/api/get_subtitles/${videoPath}`);
+        if (!response.ok) return [];
+        const data = await response.json();
+        return data.subtitles || [];
+    } catch (error) {
+        console.error("Erro ao buscar legendas:", error);
+        return [];
+    }
+}
+
 socket.on('sync_state', (state) => {
     console.log({state});
     if (state.video) {
         console.log(`Sincronizando com estado: ${state.video} @ ${state.time}s`);
         isSyncing = true;
-        // Usa a API do Plyr para mudar a fonte do vídeo
-        player.source = {
-            type: 'video',
-            sources: [{ src: `/video/${state.video}` }],
-        };
+
+        // Busca as legendas antes de configurar a fonte do player
+        loadSubtitles(state.video).then(tracks => {
+            console.log("Legendas encontradas:", tracks);
+            player.source = {
+                type: 'video',
+                sources: [{ src: `/video/${state.video}` }],
+                tracks: tracks
+            };
+        });
+
         player.currentTime = state.time;
         if (state.paused) {
             player.pause();
@@ -258,11 +276,17 @@ socket.on('sync_event', (data) => {
     try {
         switch(data.type) {
             case 'set_video':
-                player.source = {
-                    type: 'video',
-                    sources: [{ src: `/video/${data.video}` }],
-                };
-                player.pause();
+                // Busca as legendas e então atualiza o player
+                loadSubtitles(data.video).then(tracks => {
+                    console.log("Legendas encontradas:", tracks);
+                    player.source = {
+                        type: 'video',
+                        sources: [{ src: `/video/${data.video}` }],
+                        tracks: tracks
+                    };
+                    player.pause();
+                });
+
                 player.currentTime = 0;
                 break;
             case 'play':
