@@ -40,7 +40,7 @@ export async function initializeChat(socket, currentUserName, showNotification) 
 
      let pfpImg = '';
      if (data.pfp) {
-         pfpImg = `<img src="${data.pfp}" alt="pfp">`;
+         pfpImg = `<img src="${data.pfp}" alt="pfp" class="user-pfp">`;
      }
 
      msg.innerHTML = `${pfpImg}<strong>${data.sender}:</strong> ${data.text}`;
@@ -123,9 +123,11 @@ export async function initializeChat(socket, currentUserName, showNotification) 
          const user = users[sid];
          const li = document.createElement('div');
          li.classList.add('user-item');
-         const pfpImg = user.pfp ? `<img src="${user.pfp}" alt="pfp">` : '';
-         const hostBadge = user.isHost ? '<span id="host-badge">HOST</span>' : '';
-         li.innerHTML = `${pfpImg} ${user.name} ${hostBadge}`;
+         if (user.isHost) {
+             li.classList.add('chat-host');
+         }
+         const pfpImg = user.pfp ? `<img src="${user.pfp}" alt="pfp" class="user-pfp">` : '';
+         li.innerHTML = `${pfpImg} ${user.name}`;
          userList.appendChild(li);
      }
     });

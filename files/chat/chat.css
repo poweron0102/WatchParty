@@ -55,11 +55,49 @@
     border-bottom: 1px solid var(--border-color);
 }
 
-#user-list, #chat-box { padding: 15px; }
+#user-list {
+    display: flex;
+    padding: 15px;
+    border-bottom: 1px solid var(--border-color);
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 10px;
+    flex-shrink: 0;
+}
+#user-list::-webkit-scrollbar { width: 8px; }
+#user-list::-webkit-scrollbar-track { background: var(--bg-secondary); }
+#user-list::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 4px; }
+#user-list::-webkit-scrollbar-thumb:hover { background: #555; }
+
+.user-item {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    flex-direction: column;
+    border: 1px solid var(--border-color);
+    padding: 0.5rem;
+    border-radius: 8px;
+    background-color: var(--bg-tertiary);
+    transition: background-color 0.2s ease;
+    justify-content: space-around;
+    width: 120px;
+    height: 120px;
+}
+.user-item .user-pfp {
+    width: 65px;
+    height: 65px;
+    border-radius: 50%;
+}
+
+.chat-host {
+    border: 1px solid #ffc107;
+}
+
+#chat-box {padding: 15px;}
 #chat-box { flex: 1; overflow-y: auto; }
-#chat-box::-webkit-scrollbar { width: 8px; }
+#chat-box::-webkit-scrollbar { width: 2px; }
 #chat-box::-webkit-scrollbar-track { background: var(--bg-secondary); }
-#chat-box::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 4px; }
+#chat-box::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 1px; }
 #chat-box::-webkit-scrollbar-thumb:hover { background: #555; }
 
 #chat-input-area { display: flex; border-top: 1px solid var(--border-color); padding: 10px; background-color: var(--bg-secondary); }
@@ -69,5 +107,4 @@
 #send-btn:hover { background: var(--accent-hover); }
 #send-btn svg { width: 20px; height: 20px; vertical-align: middle; }
 
-.user-item img, .chat-msg img { width: 24px; height: 24px; border-radius: 50%; vertical-align: middle; margin-right: 8px; }
-#host-badge { background: var(--host-badge-bg); color: var(--host-badge-text); font-size: 0.7em; font-weight: bold; padding: 2px 5px; border-radius: 4px; margin-left: 5px; }
+.chat-msg .user-pfp { width: 24px; height: 24px; border-radius: 50%; vertical-align: middle; margin-right: 8px; }
