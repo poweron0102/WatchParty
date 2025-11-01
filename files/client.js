@@ -1,19 +1,17 @@
 // /files/client.js
 
+import { initializeChat } from './chat/chat.js';
+
 // --- Conexão e Elementos DOM ---
 const socket = io();
 // Inicializa o Plyr. Ele substitui o elemento <video> padrão por um mais robusto.
 const player = new Plyr('#player', {
     tooltips: { controls: true, seek: true }
 });
-const video = player.media; // Acesso ao elemento <video> original, se necessário
-const chatBox = document.getElementById('chat-box');
-const chatInput = document.getElementById('chat-input');
-const sendBtn = document.getElementById('send-btn');
-const userList = document.getElementById('user-list');
+const userListContainer = document.getElementById('user-list'); // Apenas para o ping
 const pingInfo = document.createElement('div'); // Criei o elemento para o ping
 pingInfo.id = 'ping-info';
-userList.parentNode.insertBefore(pingInfo, userList); // Adicionei antes da lista de usuários
+if (userListContainer) userListContainer.parentNode.insertBefore(pingInfo, userListContainer); // Adicionei antes da lista de usuários
 
 // --- Estado do Cliente ---
 let isHost = false;
@@ -72,104 +70,17 @@ document.addEventListener('DOMContentLoaded', () => {
     showNotification(`Bem-vindo à party, <strong>${userName}</strong>!`, 'success');
 });
 
-
-// --- Funções de Chat ---
-function sendMessage(text) {
-    const message = text || chatInput.value;
-    if (message.trim()) {
-        socket.emit('send_message', message);
-        chatInput.value = '';
-    }
-}
-sendBtn.onclick = () => sendMessage();
-chatInput.onkeydown = (e) => {
-    if (e.key === 'Enter') sendMessage();
-};
-
-function addChatMessage(data) {
-    // data = { sender, pfp, text }
-    const msg = document.createElement('p');
-    msg.classList.add('chat-msg');
-
-    let pfpImg = '';
-    if (data.pfp) {
-        pfpImg = `<img src="${data.pfp}" alt="pfp">`;
-    }
-
-    msg.innerHTML = `${pfpImg}<strong>${data.sender}:</strong> ${data.text}`; // Cuidado com XSS em produção
-    chatBox.appendChild(msg);
-    chatBox.scrollTop = chatBox.scrollHeight;
-}
-
-// --- Upload de Imagem ---
-async function handleImageUpload(file) {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-        const response = await fetch('/api/upload_image', {
-            method: 'POST',
-            body: formData
-        });
-
-        if (!response.ok) {
-            throw new Error(`Upload failed: ${response.status} ${response.statusText}`);
-        }
-
-        const image = await response.json();
-        if (!image || !image.url) {
-            throw new Error('Resposta inválida do servidor');
-        }
-
-        const imgTag = `<img src="${image.url}" style="width:100%;height:100%;object-fit:cover;display:block; border-radius: 1rem;">`;
-        sendMessage(imgTag);
-    } catch (error) {
-        console.error('Erro ao enviar imagem:', error);
-        addChatMessage({
-            sender: 'System',
-            text: 'Erro ao enviar imagem.'
-        });
-    }
-}
-
-chatInput.addEventListener('paste', (e) => {
-    const items = (e.clipboardData || e.originalEvent.clipboardData).items;
-    for (const item of items) {
-        if (item.type.indexOf('image') !== -1) {
-            const blob = item.getAsFile();
-            handleImageUpload(blob);
-            e.preventDefault();
-        }
-    }
-});
-
-chatInput.addEventListener('dragover', (e) => {
-    e.preventDefault();
-});
-
-chatInput.addEventListener('drop', (e) => {
-    e.preventDefault();
-    const files = (e.dataTransfer || e.originalEvent.dataTransfer).files;
-    if (files.length > 0) {
-        const file = files[0];
-        if (file.type.indexOf('image') !== -1) {
-            handleImageUpload(file).then(r => {});
-        }
-    }
-});
-
+// --- Inicializa o Módulo de Chat ---
+initializeChat(socket, userName, showNotification);
 
 // --- Listeners de Eventos do Socket.IO ---
 
 socket.on('set_host', () => {
     isHost = true;
     console.log("Você foi definido como o HOST!");
-    // O host é o único que deve ter os controles habilitados
-    // (embora 'controls' já esteja lá, isso é conceitual)
 });
 
 socket.on('update_users', (users) => {
-    userList.innerHTML = '';
     const previousUsers = clientState.users;
     const previousHostSid = Object.keys(previousUsers).find(sid => previousUsers[sid].isHost);
 
@@ -194,33 +105,6 @@ socket.on('update_users', (users) => {
     }
 
     clientState.users = users; // Atualiza o estado
-
-    for (const sid in users) {
-        const user = users[sid];
-        const li = document.createElement('div');
-        li.classList.add('user-item');
-
-        let pfpImg = '';
-        if (user.pfp) {
-            pfpImg = `<img src="${user.pfp}" alt="pfp">`;
-        }
-
-        let hostBadge = '';
-        if (user.isHost) {
-            hostBadge = '<span id="host-badge">HOST</span>';
-        }
-
-        li.innerHTML = `${pfpImg} ${user.name} ${hostBadge}`;
-        userList.appendChild(li);
-    }
-});
-
-socket.on('new_message', (data) => {
-    // Mostra notificação apenas para mensagens de outros usuários
-    if (data.sender !== userName) {
-        showNotification(`<strong>${data.sender}</strong>: ${data.text.length > 50 ? data.text.substring(0, 50) + '...' : data.text}`);
-    }
-    addChatMessage(data);
 });
 
 async function loadSubtitles(videoPath) {

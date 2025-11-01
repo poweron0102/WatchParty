@@ -7,36 +7,23 @@
      <link rel="preconnect" href="https://fonts.googleapis.com">
      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
-     <!-- Plyr CSS -->
      <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
-     <!-- Fim Plyr CSS -->
      <link rel="stylesheet" href="party.css">
+     <link rel="stylesheet" href="chat/chat.css">
      <link rel="icon" type="image/png" href="system_avatar.png">
  </head>
  <body>
      <div id="main-content">
          <div id="video-container">
-             <video id="player" controls poster="https://via.placeholder.com/1280x720/000000/FFFFFF?text=Carregando+v%C3%ADdeo..."></video>
+             <video id="player" controls></video>
          </div>
      </div>
-     <div id="sidebar">
-         <button id="sidebar-toggle" title="Recolher chat">&gt;</button>
-         <h3>Usuários</h3>
-         <div id="user-list"></div>
-         <h3>Chat</h3>
-         <div id="chat-box"></div>
-         <div id="chat-input-area">
-             <input id="chat-input" type="text" placeholder="Digite uma mensagem...">
-             <button id="send-btn" title="Enviar mensagem">
-                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path></svg>
-             </button>
-         </div>
-     </div>
+     
+     <!-- O conteúdo do chat será carregado aqui pelo JavaScript -->
+     <div id="chat-container"></div>
 
      <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-     <!-- Plyr JS -->
      <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
-     <script src="client.js"></script>
-     <script src="party.js"></script>
+     <script type="module" src="client.js"></script>
  </body>
  </html>
