@@ -101,9 +101,11 @@ export async function initializeChat(socket, currentUserName, showNotification) 
      if (sidebar.classList.contains('collapsed')) {
          toggleBtn.innerHTML = '<';
          toggleBtn.title = 'Expandir chat';
+         chatContainer.style.width = '0';
      } else {
          toggleBtn.innerHTML = '>';
          toggleBtn.title = 'Recolher chat';
+         chatContainer.style.width = 'auto';
      }
     }
     toggleBtn.addEventListener('click', toggleSidebar);
