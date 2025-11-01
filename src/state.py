@@ -4,5 +4,5 @@ server_state = {
     "is_paused": True,
     "current_time": 0,
     "host_sid": None,
-    "users": {}  # Formato: {sid: {"name": "...", "pfp": "..."}}
+    "users": {}
 }

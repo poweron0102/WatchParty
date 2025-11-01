@@ -1,5 +1,3 @@
-# /src/socket_events.py
-
 from server_setup import sio
 from state import server_state
 
@@ -18,12 +16,10 @@ async def join_room(sid, data):
     if server_state["host_sid"] is None:
         server_state["host_sid"] = sid
         server_state["users"][sid]["isHost"] = True
-        await sio.emit('set_host', to=sid)  # Avisa o cliente que ele é o host
+        await sio.emit('set_host', to=sid)
 
-    # Envia a lista de usuários atualizada para todos
     await sio.emit('update_users', server_state["users"])
 
-    # Envia o estado atual do vídeo para o novo usuário
     await sio.emit('sync_state', {
         "video": server_state["current_video"],
         "time": server_state["current_time"],
@@ -42,6 +38,7 @@ async def disconnect(sid):
         if server_state["users"]:
             new_host_sid = list(server_state["users"].keys())[0]
             server_state["host_sid"] = new_host_sid
+            server_state["users"][new_host_sid]["isHost"] = True
             await sio.emit('set_host', to=new_host_sid)
         else:
             server_state["host_sid"] = None  # Sala vazia
@@ -70,10 +67,22 @@ async def set_video(sid, video_name):
     server_state["current_time"] = 0
     server_state["is_paused"] = True
 
-    # Envia evento para TODOS (incluindo o host)
     await sio.emit('sync_event', {
         "type": "set_video",
         "video": video_name
+    })
+
+    last_slash_index = max(video_name.rfind('/'), video_name.rfind('\\'))
+    dir_path = video_name[:last_slash_index] + "/" if last_slash_index != -1 else ''
+    base_name = video_name[last_slash_index + 1:video_name.rfind('.')] if last_slash_index != -1 else video_name[:video_name.rfind('.')]
+    video_preview_path = f'/videos/{dir_path}.previews/{base_name}_banner.png'
+    await sio.emit('new_message', {
+        "sender": "System",
+        "pfp": "/system_avatar.png",
+        "text": f"""
+            Playing video: {base_name} <br>
+            <img src="{video_preview_path}" style="width:100%;height:100%;object-fit:cover;display:block; border-radius: 1rem;">
+        """
     })
 
 
@@ -81,7 +90,7 @@ async def set_video(sid, video_name):
 async def host_sync_event(sid, data):
     # data = {"type": "play" | "pause" | "seek", "time": 123.45}
     if sid != server_state["host_sid"]:
-        return  # Ignora se não for o host
+        return
 
     # Atualiza estado do servidor
     if data["type"] == "play":
@@ -108,18 +117,12 @@ async def handle_client_sync_request(sid):
         return
 
     try:
-        # Usa sio.call para pedir o tempo atual diretamente ao host.
-        # Isso espera (await) uma resposta do cliente host.
-        # O timeout evita que o servidor fique travado se o host não responder.
         host_state = await sio.call('get_host_time', to=host_sid, timeout=2)
 
-        # Atualiza o estado do servidor com a informação mais recente
         server_state["current_time"] = host_state["time"]
         server_state["is_paused"] = host_state["paused"]
 
-        # Envia o estado "fresco" de volta para o cliente que solicitou
         await sio.emit('force_sync', host_state, to=sid)
 
     except Exception as e:
-        # Pode ocorrer um TimeoutError se o host não responder a tempo.
         print(f"Não foi possível obter o tempo do host ({host_sid}): {e}")

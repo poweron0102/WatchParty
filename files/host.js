@@ -52,7 +52,7 @@ function navigate(path = '') {
         .then(res => res.json())
         .then(data => {
             renderBreadcrumb(path);
-            fileBrowser.innerHTML = ''; // Limpa todo o conteúdo
+            fileBrowser.innerHTML = '';
 
             if (data.items.length === 0) {
                 fileBrowser.innerHTML = '<p>Nenhum item encontrado.</p>';
