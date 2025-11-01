@@ -1,9 +1,9 @@
 /* /files/chat/chat.css */
 
 #chat-container {
-    display: flex; /* Garante que a sidebar se comporte como flex item */
-    position: relative; /* Necessário para o posicionamento absoluto do botão toggle */
-    transition: flex 0.3s ease-in-out; /* Adiciona transição suave ao container */
+    display: flex;
+    position: relative;
+    transition: flex 0.3s ease-in-out;
 }
 
 #sidebar {
@@ -27,9 +27,9 @@
 
 #sidebar-toggle {
     position: absolute;
-    top: 50%; /* Centraliza verticalmente */
-    transform: translateY(-50%); /* Ajuste fino da centralização vertical */
-    left: -25px; /* Posiciona o botão para fora da sidebar */
+    top: 5%;
+    transform: translateY(-50%);
+    left: -25px;
     width: 25px;
     height: 40px;
     background-color: var(--bg-secondary);
