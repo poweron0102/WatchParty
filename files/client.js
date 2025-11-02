@@ -8,15 +8,11 @@ const socket = io();
 const player = new Plyr('#player', {
     tooltips: { controls: true, seek: true }
 });
-const userListContainer = document.getElementById('user-list'); // Apenas para o ping
-const pingInfo = document.createElement('div'); // Criei o elemento para o ping
-pingInfo.id = 'ping-info';
-if (userListContainer) userListContainer.parentNode.insertBefore(pingInfo, userListContainer); // Adicionei antes da lista de usuários
 
 // --- Estado do Cliente ---
 let isHost = false;
-let isSyncing = false; // Flag para evitar loops de eventos (muito importante!)
-let syncInterval = null; // Nosso intervalo de sincronização
+let isSyncing = false; // Flag para evitar loops de eventos
+let syncInterval = null; // intervalo de sincronização
 let syncRequestTime = 0; // Para calcular o ping
 let clientState = { users: {} }; // Para rastrear o estado e detectar mudanças
 
@@ -200,7 +196,6 @@ socket.on('force_sync', (data) => {
 
     // Calcula a latência (ping) da requisição
     const ping = Date.now() - syncRequestTime;
-    pingInfo.textContent = `Ping: ${ping}ms`; // Mostra o ping na tela
     const latency = ping / 2; // Tempo de ida
     const correctedTime = data.time + (latency / 1000); // Converte latência para segundos
 
