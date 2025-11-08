@@ -36,6 +36,46 @@ function createNotificationContainer() {
     return container;
 }
 
+function isVideoFromYoutube(videoURL) {
+    if (!videoURL || typeof videoURL !== 'string') return false;
+    let url = videoURL.trim();
+    // adiciona protocolo se ausente para permitir uso do URL parser
+    if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(url)) {
+        url = 'https://' + url;
+    }
+
+    try {
+        const u = new URL(url);
+        const host = u.hostname.toLowerCase();
+
+        // Hosts válidos do YouTube
+        const isYoutuBe = host === 'youtu.be' || host.endsWith('.youtu.be');
+        const isYoutubeDomain =
+            host === 'youtube.com' ||
+            host.endsWith('.youtube.com') ||
+            host === 'youtube-nocookie.com' ||
+            host.endsWith('.youtube-nocookie.com');
+
+        if (isYoutuBe) {
+            // youtu.be/<id>
+            return !!u.pathname.replace(/\//g, '');
+        }
+
+        if (!isYoutubeDomain) return false;
+
+        const path = u.pathname;
+        // youtube.com/watch?v=ID
+        if (u.searchParams.has('v')) return true;
+        // /embed/ID , /v/ID , /shorts/ID
+        if (/^\/(embed|v|shorts)\/[^/]+/.test(path)) return true;
+
+        return false;
+    } catch (e) {
+        return false;
+    }
+}
+
+
 const notificationContainer = createNotificationContainer();
 
 function showNotification(message, type = 'info') {
@@ -121,15 +161,23 @@ socket.on('sync_state', (state) => {
         console.log(`Sincronizando com estado: ${state.video} @ ${state.time}s`);
         isSyncing = true;
 
-        // Busca as legendas antes de configurar a fonte do player
-        loadSubtitles(state.video).then(tracks => {
-            console.log("Legendas encontradas:", tracks);
+        // Verifica se é uma URL do YouTube ou um arquivo local
+        if (state.video.startsWith('http')) {
             player.source = {
                 type: 'video',
-                sources: [{ src: `/video/${state.video}` }],
-                tracks: tracks
+                sources: [{ src: state.video, provider: 'youtube' }]
             };
-        });
+        } else {
+            // Busca as legendas antes de configurar a fonte do player para arquivos locais
+            loadSubtitles(state.video).then(tracks => {
+                console.log("Legendas encontradas:", tracks);
+                player.source = {
+                    type: 'video',
+                    sources: [{ src: `/video/${state.video}` }],
+                    tracks: tracks
+                };
+            });
+        }
 
         player.currentTime = state.time;
         if (state.paused) {
@@ -156,17 +204,34 @@ socket.on('sync_event', (data) => {
     try {
         switch(data.type) {
             case 'set_video':
-                // Busca as legendas e então atualiza o player
-                loadSubtitles(data.video).then(tracks => {
-                    console.log("Legendas encontradas:", tracks);
-                    player.source = {
-                        type: 'video',
-                        sources: [{ src: `/video/${data.video}` }],
-                        tracks: tracks
-                    };
-                    player.pause();
-                });
+                if (data.video.startsWith('http')) {
 
+                    if (isVideoFromYoutube(data.video)) {
+                        player.source = {
+                            type: 'video',
+                            sources: [{src: data.video, provider: 'youtube'}]
+                        };
+                    }
+                    else {
+                        player.source = {
+                            type: 'video',
+                            sources: [{src: data.video}]
+                        };
+                    }
+
+                } else {
+                    // Busca as legendas e então atualiza o player para arquivos locais
+                    loadSubtitles(data.video).then(tracks => {
+                        console.log("Legendas encontradas:", tracks);
+                        player.source = {
+                            type: 'video',
+                            sources: [{ src: `/video/${data.video}` }],
+                            tracks: tracks
+                        };
+                    });
+                }
+
+                player.pause();
                 player.currentTime = 0;
                 break;
             case 'play':

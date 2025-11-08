@@ -72,18 +72,25 @@ async def set_video(sid, video_name):
         "video": video_name
     })
 
-    last_slash_index = max(video_name.rfind('/'), video_name.rfind('\\'))
-    dir_path = video_name[:last_slash_index] + "/" if last_slash_index != -1 else ''
-    base_name = video_name[last_slash_index + 1:video_name.rfind('.')] if last_slash_index != -1 else video_name[:video_name.rfind('.')]
-    video_preview_path = f'/videos/{dir_path}.previews/{base_name}_banner.png'
-    await sio.emit('new_message', {
-        "sender": "System",
-        "pfp": "/system_avatar.png",
-        "text": f"""
-            Playing video: {base_name} <br>
-            <img src="{video_preview_path}" style="width:100%;height:100%;object-fit:cover;display:block; border-radius: 1rem;">
-        """
-    })
+    if video_name.startswith("http"):
+        await sio.emit('new_message', {
+            "sender": "System",
+            "pfp": "/system_avatar.png",
+            "text": f"Reproduzindo vídeo de: {video_name}"
+        })
+    else:
+        last_slash_index = max(video_name.rfind('/'), video_name.rfind('\\'))
+        dir_path = video_name[:last_slash_index] + "/" if last_slash_index != -1 else ''
+        base_name = video_name[last_slash_index + 1:video_name.rfind('.')] if last_slash_index != -1 else video_name[:video_name.rfind('.')]
+        video_preview_path = f'/videos/{dir_path}.previews/{base_name}_banner.png'
+        await sio.emit('new_message', {
+            "sender": "System",
+            "pfp": "/system_avatar.png",
+            "text": f"""
+                Playing video: {base_name} <br>
+                <img src="{video_preview_path}" style="width:100%;height:100%;object-fit:cover;display:block; border-radius: 1rem;">
+            """
+        })
 
 
 @sio.on("host_sync")

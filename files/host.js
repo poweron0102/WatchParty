@@ -4,6 +4,8 @@ const linkEl = document.getElementById('access-link');
 const copyLinkBtn = document.getElementById('copy-link-btn');
 const updateBannersBtn = document.getElementById('update-banners-btn');
 const fileBrowser = document.getElementById('file-browser');
+const youtubeUrlInput = document.getElementById('youtube-url-input');
+const setYoutubeUrlBtn = document.getElementById('set-youtube-url-btn');
 const breadcrumb = document.getElementById('breadcrumb');
 
 let currentPath = '';
@@ -26,6 +28,16 @@ copyLinkBtn.onclick = () => {
         copyLinkBtn.textContent = 'Copiado!';
         setTimeout(() => { copyLinkBtn.textContent = 'Copiar Link'; }, 2000);
     });
+};
+
+// Novo: Enviar URL do YouTube
+setYoutubeUrlBtn.onclick = () => {
+    const url = youtubeUrlInput.value.trim();
+    if (url) {
+        socket.emit('host_set_video', url);
+        alert(`Vídeo da URL "${url}" definido para todos os usuários!`);
+        youtubeUrlInput.value = '';
+    }
 };
 
 // 3. Atualizar Banners
