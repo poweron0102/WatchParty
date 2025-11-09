@@ -8,6 +8,7 @@ const socket = io();
 const player = new Plyr('#player', {
     tooltips: { controls: true, seek: true }
 });
+const statusIndicator = document.getElementById('status-indicator');
 
 // --- Estado do Cliente ---
 let isHost = false;
@@ -109,11 +110,23 @@ document.addEventListener('DOMContentLoaded', () => {
 // --- Inicializa o Módulo de Chat ---
 initializeChat(socket, userName, showNotification);
 
+// --- Funções de UI ---
+function updateStatusIndicator() {
+    if (isHost) {
+        statusIndicator.innerHTML = `<span class="host-label">⭐ Você é o Host</span>`;
+    } else {
+        // O texto do ping será atualizado pelo evento 'force_sync'
+        statusIndicator.innerHTML = `Ping: <span class="ping-value">-- ms</span>`;
+    }
+}
+
 // --- Listeners de Eventos do Socket.IO ---
 
 socket.on('set_host', () => {
     isHost = true;
+    updateStatusIndicator();
     console.log("Você foi definido como o HOST!");
+    // Oculta o botão do painel do host se o usuário não for o host
 });
 
 socket.on('update_users', (users) => {
@@ -133,11 +146,13 @@ socket.on('update_users', (users) => {
     // Detectar mudança de host
     const newHostSid = Object.keys(users).find(sid => users[sid].isHost);
     if (newHostSid && newHostSid !== previousHostSid) {
+        const wasHost = isHost;
         const newHostName = users[newHostSid].name;
         // Não notificar se você se tornou o host (já tem o log no console)
         if (newHostSid !== socket.id) {
             showNotification(`<strong>${newHostName}</strong> agora é o host.`, 'warning');
         }
+        if (wasHost && newHostSid !== socket.id) updateStatusIndicator();
     }
 
     clientState.users = users; // Atualiza o estado
@@ -265,6 +280,7 @@ socket.on('force_sync', (data) => {
     const correctedTime = data.time + (latency / 1000); // Converte latência para segundos
 
     console.log(`Sync forçado recebido. Tempo do Host: ${data.time.toFixed(2)}s, Ping: ${ping}ms, Tempo Corrigido: ${correctedTime.toFixed(2)}s`);
+    statusIndicator.innerHTML = `Ping: <span class="ping-value">${ping} ms</span>`;
 
     // Só ajusta se a diferença for maior que 2 segundos para evitar "pulos"
     if (Math.abs(player.currentTime - correctedTime) > 2) {
