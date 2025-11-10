@@ -2,6 +2,12 @@
 
 Aplicação em Python para assistir vídeos localmente com amigos.
 
+## preview:
+![watch-party0.png](preview/watch-party0.png)
+![watch-party1.png](preview/watch-party1.png)
+![watch-party2.png](preview/watch-party2.png)
+---
+
 ## Como Usar (Host)
 
 1.  **Instalar dependências:**
@@ -9,12 +15,13 @@ Aplicação em Python para assistir vídeos localmente com amigos.
     pip install -r requirements.txt
     ```
 2.  **Configurar:**
-    * Crie um arquivo `save.json` na raiz do projeto.
+    * Abra o arquivo `save.json` na raiz do projeto.
     * Adicione o caminho para sua pasta de vídeos:
         ```json
         {
             "port": 5467,
-            "video_dir": "/caminho/para/seus/videos"
+            "video_dir": "/caminho/para/seus/videos",
+            "auto_scrape": false
         }
         ```
 3.  **Iniciar o Servidor:**
