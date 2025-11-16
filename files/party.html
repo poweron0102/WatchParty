@@ -16,7 +16,7 @@
      <div id="main-content">
         <div id="main-header">
             <a href="/host" target="_blank" id="host-panel-button" title="Painel do Host">
-                <img src="/system_avatar.png" alt="Painel do Host">
+                <img src="system_avatar.png" alt="Painel do Host">
             </a>
             <div id="status-indicator"></div>
             <div id="audio-controls-container" style="display: none;">
@@ -24,6 +24,9 @@
                 <select id="dub-selector"></select>
                 <label for="dub-volume">Volume:</label>
                 <input type="range" id="dub-volume" min="0" max="1" step="0.05" value="1">
+                <label for="dub-delay" title="Ajuste o tempo do áudio em segundos. Use valores negativos para adiantar e positivos para atrasar.">Atraso (s):</label>
+                <input type="number" id="dub-delay" min="-30" max="30" step="0.1" value="0">
+
             </div>
         </div>
          <div id="video-container">

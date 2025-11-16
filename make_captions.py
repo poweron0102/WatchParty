@@ -6,6 +6,9 @@ import sys
 # Lista de extensões de vídeo comuns a serem verificadas
 VIDEO_EXTENSIONS = {'.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm'}
 
+MAKE_SUBS = input("Gostaria de fazer as legendas? y/N ").upper() in "YS"
+MAKE_DUBS = input("Gostaria de fazer as dublagens? y/N ").upper() in "YS"
+
 
 def find_media_streams(video_path):
     """
@@ -37,6 +40,7 @@ def extract_subtitle(video_path, stream_index, output_path):
         'ffmpeg',
         '-i', video_path,
         '-map', f'0:s:{stream_index}',  # Mapeia a trilha de legenda pelo índice
+        '-map_metadata', '-1',  # Remove metadados para evitar problemas de conversão
         '-c:s', 'webvtt',  # Converte para o formato WebVTT
         '-y',  # Sobrescreve o arquivo de saída se ele já existir
         output_path
@@ -59,6 +63,7 @@ def extract_audio(video_path, stream_index, output_path):
         'ffmpeg',
         '-i', video_path,
         '-map', f'0:a:{stream_index}',  # Mapeia a trilha de áudio pelo índice relativo
+        '-map_metadata', '-1',  # Remove metadados para consistência
         '-c:a', 'libmp3lame',  # Converte para o formato MP3
         '-q:a', '2',  # Qualidade do MP3 (0-9, menor é melhor)
         '-y',  # Sobrescreve o arquivo de saída se ele já existir
@@ -104,7 +109,7 @@ def process_videos_in_directory(root_dir):
                 continue
 
             # --- Processa Legendas ---
-            if subtitle_streams:
+            if subtitle_streams and MAKE_SUBS:
                 print(f"  - Encontradas {len(subtitle_streams)} trilha(s) de legenda.")
                 subs_dir = os.path.join(dirpath, '.subs')
                 os.makedirs(subs_dir, exist_ok=True)
@@ -120,7 +125,7 @@ def process_videos_in_directory(root_dir):
 
             # --- Processa Dublagens ---
             # Só extrai se houver mais de uma faixa de áudio (considerando que a primeira é a original)
-            if len(audio_streams) > 1:
+            if len(audio_streams) > 1 and MAKE_DUBS:
                 print(f"  - Encontradas {len(audio_streams)} trilha(s) de áudio (possíveis dublagens).")
                 dubs_dir = os.path.join(dirpath, '.dubs')
                 os.makedirs(dubs_dir, exist_ok=True)

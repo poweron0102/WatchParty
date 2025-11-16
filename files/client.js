@@ -13,6 +13,7 @@ const statusIndicator = document.getElementById('status-indicator');
 const audioControlsContainer = document.getElementById('audio-controls-container');
 const dubSelector = document.getElementById('dub-selector');
 const dubVolume = document.getElementById('dub-volume');
+const dubDelayInput = document.getElementById('dub-delay');
 
 
 // --- Estado do Cliente ---
@@ -73,9 +74,8 @@ function isVideoFromYoutube(videoURL) {
         // youtube.com/watch?v=ID
         if (u.searchParams.has('v')) return true;
         // /embed/ID , /v/ID , /shorts/ID
-        if (/^\/(embed|v|shorts)\/[^/]+/.test(path)) return true;
+        return /^\/(embed|v|shorts)\/[^/]+/.test(path);
 
-        return false;
     } catch (e) {
         return false;
     }
@@ -218,6 +218,10 @@ dubVolume.addEventListener('input', (e) => {
     dubPlayer.volume = e.target.value;
 });
 
+dubDelayInput.addEventListener('change', (e) => {
+    // Ao mudar o delay, ajusta o tempo da dublagem imediatamente
+    dubPlayer.currentTime = player.currentTime + parseFloat(e.target.value);
+});
 socket.on('sync_state', (state) => {
     console.log({state});
     if (state.video) {
@@ -314,7 +318,8 @@ socket.on('sync_event', (data) => {
                 if (Math.abs(player.currentTime - data.time) > 1.5) {
                     player.currentTime = data.time;
                 }
-                dubPlayer.currentTime = player.currentTime; // Sempre sincroniza o tempo da dublagem
+                // Sincroniza o tempo da dublagem aplicando o atraso definido pelo usuário
+                dubPlayer.currentTime = player.currentTime + parseFloat(dubDelayInput.value);
                 break;
         }
     } catch (e) {
@@ -408,7 +413,7 @@ player.on('pause', () => {
 player.on('seeked', () => {
     if (isHost && !isSyncing) {
         console.log("Host buscou (Seek)");
-        dubPlayer.currentTime = player.currentTime;
+        dubPlayer.currentTime = player.currentTime + parseFloat(dubDelayInput.value);
         socket.emit('host_sync', { type: 'seek', time: player.currentTime });
     }
 });
