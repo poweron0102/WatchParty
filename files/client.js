@@ -8,7 +8,12 @@ const socket = io();
 const player = new Plyr('#player', {
     tooltips: { controls: true, seek: true }
 });
+const dubPlayer = document.getElementById('dub-player');
 const statusIndicator = document.getElementById('status-indicator');
+const audioControlsContainer = document.getElementById('audio-controls-container');
+const dubSelector = document.getElementById('dub-selector');
+const dubVolume = document.getElementById('dub-volume');
+
 
 // --- Estado do Cliente ---
 let isHost = false;
@@ -158,17 +163,60 @@ socket.on('update_users', (users) => {
     clientState.users = users; // Atualiza o estado
 });
 
-async function loadSubtitles(videoPath) {
+async function loadMediaTracks(videoPath) {
     try {
         const response = await fetch(`/api/get_subtitles/${videoPath}`);
-        if (!response.ok) return [];
+        console.log("Resposta do servidor:", response);
+        if (!response.ok) return { subtitles: [], dubs: [] };
         const data = await response.json();
-        return data.subtitles || [];
+        console.log("Resposta do servidor processada:", data);
+        return {
+            subtitles: data.subtitles || [],
+            dubs: data.dubs || []
+        };
     } catch (error) {
-        console.error("Erro ao buscar legendas:", error);
-        return [];
+        console.error("Erro ao buscar faixas de mídia:", error);
+        return { subtitles: [], dubs: [] };
     }
 }
+
+function setupDubControls(dubs) {
+    // Limpa opções anteriores
+    dubSelector.innerHTML = '';
+
+    if (dubs && dubs.length > 1) {
+        dubs.forEach(dub => {
+            const option = document.createElement('option');
+            option.value = dub.lang;
+            option.textContent = dub.label;
+            option.dataset.src = dub.src || ''; // Armazena a URL no dataset
+            dubSelector.appendChild(option);
+        });
+        audioControlsContainer.style.display = 'flex';
+    } else {
+        // Esconde os controles se não houver dublagens
+        audioControlsContainer.style.display = 'none';
+    }
+}
+
+dubSelector.addEventListener('change', (e) => {
+    const selectedOption = e.target.options[e.target.selectedIndex];
+    const src = selectedOption.dataset.src;
+
+    if (src) {
+        dubPlayer.src = src;
+        dubPlayer.currentTime = player.currentTime;
+        if (!player.paused) dubPlayer.play();
+        player.muted = true;
+    } else { // Áudio original
+        dubPlayer.src = '';
+        player.muted = false;
+    }
+});
+
+dubVolume.addEventListener('input', (e) => {
+    dubPlayer.volume = e.target.value;
+});
 
 socket.on('sync_state', (state) => {
     console.log({state});
@@ -184,13 +232,14 @@ socket.on('sync_state', (state) => {
             };
         } else {
             // Busca as legendas antes de configurar a fonte do player para arquivos locais
-            loadSubtitles(state.video).then(tracks => {
-                console.log("Legendas encontradas:", tracks);
+            loadMediaTracks(state.video).then(({ subtitles, dubs }) => {
+                console.log("Legendas encontradas:", subtitles);
                 player.source = {
                     type: 'video',
                     sources: [{ src: `/video/${state.video}` }],
-                    tracks: tracks
+                    tracks: subtitles
                 };
+                setupDubControls(dubs);
             });
         }
 
@@ -236,13 +285,14 @@ socket.on('sync_event', (data) => {
 
                 } else {
                     // Busca as legendas e então atualiza o player para arquivos locais
-                    loadSubtitles(data.video).then(tracks => {
-                        console.log("Legendas encontradas:", tracks);
+                    loadMediaTracks(data.video).then(({ subtitles, dubs }) => {
+                        console.log("Legendas encontradas:", subtitles);
                         player.source = {
                             type: 'video',
                             sources: [{ src: `/video/${data.video}` }],
-                            tracks: tracks
+                            tracks: subtitles
                         };
+                        setupDubControls(dubs);
                     });
                 }
 
@@ -250,9 +300,13 @@ socket.on('sync_event', (data) => {
                 player.currentTime = 0;
                 break;
             case 'play':
+                // Sincroniza o player de dublagem também
+                if (!player.muted) dubPlayer.pause(); else dubPlayer.play();
                 player.play();
                 break;
             case 'pause':
+                // Sincroniza o player de dublagem também
+                dubPlayer.pause();
                 player.pause();
                 break;
             case 'seek':
@@ -260,6 +314,7 @@ socket.on('sync_event', (data) => {
                 if (Math.abs(player.currentTime - data.time) > 1.5) {
                     player.currentTime = data.time;
                 }
+                dubPlayer.currentTime = player.currentTime; // Sempre sincroniza o tempo da dublagem
                 break;
         }
     } catch (e) {
@@ -315,6 +370,7 @@ socket.on('get_host_time', (callback) => {
 player.on('play', () => {
     if (isHost && !isSyncing) {
         console.log("Host deu Play");
+        if (!player.muted) dubPlayer.pause(); else dubPlayer.play();
         socket.emit('host_sync', { type: 'play', time: player.currentTime });
         return;
     }
@@ -335,6 +391,7 @@ player.on('play', () => {
 player.on('pause', () => {
     if (isHost && !isSyncing) {
         console.log("Host deu Pause");
+        dubPlayer.pause();
         socket.emit('host_sync', { type: 'pause', time: player.currentTime });
         return;
     }
@@ -351,6 +408,7 @@ player.on('pause', () => {
 player.on('seeked', () => {
     if (isHost && !isSyncing) {
         console.log("Host buscou (Seek)");
+        dubPlayer.currentTime = player.currentTime;
         socket.emit('host_sync', { type: 'seek', time: player.currentTime });
     }
 });

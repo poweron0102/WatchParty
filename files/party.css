@@ -93,6 +93,35 @@ video {
     height: 28px;
 }
 
+/* --- Controles de Áudio (Dublagem) --- */
+#audio-controls-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto; /* Empurra para a direita */
+    padding-right: 15px;
+}
+
+#audio-controls-container label {
+    font-size: 0.9em;
+    color: var(--text-secondary);
+}
+
+#dub-selector {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: 'Inter', sans-serif;
+}
+
+#dub-volume {
+    width: 80px;
+    cursor: pointer;
+}
+
+
 /* --- Sistema de Notificações --- */
 #notification-container {
     position: fixed;

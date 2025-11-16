@@ -159,7 +159,7 @@ async def list_videos(path: str = ""):
 @app.get("/api/get_subtitles/{video_path:path}")
 async def get_subtitles(video_path: str):
     """
-    Encontra os arquivos de legenda (.vtt) para um determinado vídeo.
+    Encontra os arquivos de legenda (.vtt) e dublagem para um determinado vídeo.
     """
     # Sanitize and validate path
     full_video_path = os.path.abspath(os.path.join(VIDEO_DIR, video_path))
@@ -167,31 +167,50 @@ async def get_subtitles(video_path: str):
         return JSONResponse(status_code=404, content={"message": "Vídeo não encontrado"})
 
     video_dir = os.path.dirname(full_video_path)
-    subs_dir = os.path.join(video_dir, ".subs")
-
-    if not os.path.isdir(subs_dir):
-        return {"subtitles": []}
-
     video_base_name = os.path.splitext(os.path.basename(full_video_path))[0]
+    relative_video_dir = os.path.dirname(video_path)
+
+    # --- Legendas ---
+    subs_dir = os.path.join(video_dir, ".subs")
     subtitles = []
-    for filename in os.listdir(subs_dir):
-        # Garante que o arquivo de legenda pertence ao vídeo solicitado
-        if filename.lower().endswith(".vtt") and filename.startswith(video_base_name):
-            # O nome do arquivo é algo como: "NomeVideo.track_0.pt.vtt"
-            parts = os.path.splitext(filename)[0].split('.')
-            lang_code = "pt"  # Default
-            if len(parts) > 2:
-                lang_code = parts[-1] if len(parts[-1]) == 2 else parts[-2]
+    if os.path.isdir(subs_dir):
+        for filename in os.listdir(subs_dir):
+            if filename.lower().endswith(".vtt") and filename.startswith(video_base_name):
+                parts = os.path.splitext(filename)[0].split('.')
+                lang_code = "pt"
+                if len(parts) > 2:
+                    lang_code = parts[-1] if len(parts[-1]) == 2 else parts[-2]
 
-            # O Plyr precisa de um caminho relativo que o servidor entenda.
-            # Usaremos o mount '/videos' que aponta para VIDEO_DIR.
-            relative_video_dir = os.path.dirname(video_path)
-            subtitle_src = os.path.join("/videos", relative_video_dir, ".subs", filename).replace("\\", "/")
+                subtitle_src = os.path.join("/videos", relative_video_dir, ".subs", filename).replace("\\", "/")
+                subtitles.append({"lang": lang_code, "label": lang_code.upper(), "src": subtitle_src})
 
-            subtitles.append({"lang": lang_code, "label": lang_code.upper(), "src": subtitle_src})
+    # --- Dublagens ---
+    dubs_dir = os.path.join(video_dir, ".dubs")
+    dubs = []
+    if os.path.isdir(dubs_dir):
+        for filename in os.listdir(dubs_dir):
+            if filename.lower().endswith((".mp3", ".aac", ".ogg")) and filename.startswith(video_base_name):
+                parts = os.path.splitext(filename)[0].split('.')
+                lang_code = "dub"
+                if len(parts) > 1:
+                    lang_code = parts[-1] if len(parts[-1]) == 2 else parts[-2]
 
-    for s in subtitles: print(s)
-    return {"subtitles": subtitles}
+                dub_src = os.path.join("/videos", relative_video_dir, ".dubs", filename).replace("\\", "/")
+                dubs.append({
+                    "lang": lang_code,
+                    "label": lang_code.upper(),
+                    "src": dub_src
+                })
+
+    # Adiciona a opção de áudio original
+    dubs.insert(0, {
+        "lang": "original",
+        "label": "Original",
+        "src": None
+    })
+
+    print(f"Mídia encontrada para '{video_path}': {len(subtitles)} legendas, {len(dubs) -1} dublagens.")
+    return {"subtitles": subtitles, "dubs": dubs}
 
 
 @app.get("/api/get_ip")
