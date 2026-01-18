@@ -151,38 +151,21 @@ function createItemElement(item) {
     const defaultFolderBanner = '/banner_folder.png';
     const defaultVideoBanner = '/banner_video.png';
 
-    // Função para buscar banner via scraping no backend
-    const fetchBannerFromBackend = () => {
-        // Remove o ano do título (ex: "Filme (2023)") para melhorar a busca
-        const searchTerm = item.name.replace(/\s*\(\d{4}\)\s*$/, '').trim();
-
-        fetch(`/api/scrape_banner?title=${encodeURIComponent(searchTerm)}`)
-            .then(res => res.json())
-            .then(data => {
-                if (data.imageUrl) {
-                    banner.src = data.imageUrl;
-                } else {
-                    console.log(`Banner para "${item.name}" não encontrado. Usando banner padrão.`);
-                    banner.src = item.type === 'folder' ? defaultFolderBanner : defaultVideoBanner;
-                }
-            })
-            .catch(error => {
-                console.error('Erro ao buscar banner via backend:', error);
-                banner.src = item.type === 'folder' ? defaultFolderBanner : defaultVideoBanner;
-            });
-    };
-
     if (item.type === 'folder') {
         // O backend salva em: /path/to/folder/.previews/banner.png
-        banner.src = `/videos/${item.path}/.previews/banner.png?t=${new Date().getTime()}`;
-        banner.onerror = fetchBannerFromBackend;
+        banner.src = `/videos/${item.path}/.previews/banner.png?`; // t=${new Date().getTime()}
+        banner.onerror = () => {
+            banner.src = defaultFolderBanner;
+        };
     } else if (item.type === 'video') {
         const lastSlashIndex = max(item.path.lastIndexOf('/'), item.path.lastIndexOf('\\'));
         const dirPath = lastSlashIndex === -1 ? '' : item.path.substring(0, lastSlashIndex);
         const baseName = item.name.substring(0, item.name.lastIndexOf('.'));
 
-        banner.src = `/videos/${dirPath ? dirPath + '/' : ''}.previews/${baseName}_banner.png?t=${new Date().getTime()}`;
-        banner.onerror = fetchBannerFromBackend;
+        banner.src = `/videos/${dirPath ? dirPath + '/' : ''}.previews/${baseName}_banner.png?`; // t=${new Date().getTime()}
+        banner.onerror = () => {
+            banner.src = defaultVideoBanner;
+        };
     }
     itemEl.appendChild(banner);
     itemEl.appendChild(nameEl);

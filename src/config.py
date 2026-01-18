@@ -25,7 +25,6 @@ if os.path.exists(SAVE_FILE):
 
 PORT = config["port"]
 VIDEO_DIR = config["video_dir"]
-AUTO_SCRAPE = config["auto_scrape"]
 
 if not os.path.isdir(VIDEO_DIR):
     print(f"Aviso: Diretório de vídeos '{VIDEO_DIR}' não encontrado. Saindo...")

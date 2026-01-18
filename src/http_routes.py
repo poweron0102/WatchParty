@@ -10,7 +10,7 @@ from imdb import Cinemagoer
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, JSONResponse
 from starlette.requests import Request
-from config import FILES_DIR, CACHE_DIR, VIDEO_DIR, PORT, AUTO_SCRAPE
+from config import FILES_DIR, CACHE_DIR, VIDEO_DIR, PORT
 from server_setup import app
 from utils import get_public_ip
 
@@ -288,22 +288,6 @@ async def update_banners():
                 print(f"Erro ao gerar thumbnail para {base_name}: {e}")
 
     return {"message": f"Banners atualizados para: {', '.join(updated_banners)}"}
-
-
-@app.get('/api/scrape_banner')
-async def scrape_banner(title: str = ""):
-    if not title:
-        return JSONResponse(status_code=400, content={"error": "Título não fornecido"})
-    if not AUTO_SCRAPE:
-        return JSONResponse(status_code=400, content={"error": "Servidor não configurado para o modo auto"})
-
-    image_url = _fetch_imdb_poster_url(title)
-
-    if image_url:
-        return {"imageUrl": image_url}
-    else:
-        # Retorna None no corpo, mas com status 200, pois a busca ocorreu sem erros, apenas não encontrou resultado.
-        return {"imageUrl": None}
 
 
 app.mount(f"/{CACHE_DIR}", StaticFiles(directory=CACHE_DIR), name="cache")
