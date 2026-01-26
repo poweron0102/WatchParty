@@ -1,4 +1,5 @@
 {
     "port": 5467,
-    "video_dir": "D:\\Users\\miche\\Videos\\Series e Filmes"
+    "video_dir": "D:\\Users\\miche\\Videos\\Series e Filmes",
+    "use_cloudflare": true
 }
