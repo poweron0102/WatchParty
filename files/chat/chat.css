@@ -83,11 +83,24 @@
     width: 120px;
     height: 120px;
     cursor: pointer;
+    position: relative;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.user-item.is-speaking {
+    border-color: #4CAF50;
+    box-shadow: 0 0 10px rgba(76, 175, 80, 0.4);
 }
 .user-item .user-pfp {
     width: 65px;
     height: 65px;
     border-radius: 50%;
+}
+.user-item .user-name {
+    width: 100%;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .chat-host {
@@ -108,8 +121,35 @@
 #send-btn:hover { background: var(--accent-hover); }
 #mic-toggle-btn { border: none; background: var(--bg-tertiary); color: var(--text-secondary); padding: 0 10px; border-radius: 5px; cursor: pointer; transition: background-color 0.2s ease; margin-right: 10px; }
 #mic-toggle-btn:hover { background: var(--border-color); }
-#mic-toggle-btn.muted #mic-icon { display: none; }
-#mic-toggle-btn.muted #mic-off-icon { display: inline-block !important; }
+
+.peer-mute-btn {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: var(--bg-secondary);
+    border: none;
+    border-radius: 50%;
+    width: 26px;
+    height: 26px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 4px;
+    color: var(--text-secondary);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    transition: color 0.2s ease;
+}
+.user-item.peer-connected .peer-mute-btn { display: flex; }
+.peer-mute-btn:hover { background: var(--bg-tertiary); }
+.peer-mute-btn svg { width: 100%; height: 100%; }
+
+.peer-mute-btn.muted, #mic-toggle-btn.muted { color: #f44336 !important; }
+.mic-on { display: block; }
+.mic-off { display: none; }
+.muted .mic-on { display: none !important; }
+.muted .mic-off { display: block !important; }
+
 #mic-toggle-btn svg { width: 20px; height: 20px; vertical-align: middle; }
 
 #send-btn svg { width: 20px; height: 20px; vertical-align: middle; }

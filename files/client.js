@@ -161,6 +161,44 @@ function updateStatusIndicator() {
     }
 }
 
+// --- Monitoramento de Voz ---
+function monitorSpeech(stream, sid) {
+    try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.5;
+        source.connect(analyser);
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        
+        const checkAudioLevel = () => {
+            if (sid !== 'local' && !peerConnections[sid]) return;
+            if (sid === 'local' && !localStream) {
+                const localItem = document.querySelector(`.user-item[data-sid="${socket.id}"]`);
+                if(localItem) localItem.classList.remove('is-speaking');
+                return;
+            }
+            
+            analyser.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for(let i=0; i<dataArray.length; i++) sum += dataArray[i];
+            const average = sum / dataArray.length;
+            
+            const targetSid = sid === 'local' ? socket.id : sid;
+            const userItem = document.querySelector(`.user-item[data-sid="${targetSid}"]`);
+            if (userItem) {
+                if (average > 15) userItem.classList.add('is-speaking');
+                else userItem.classList.remove('is-speaking');
+            }
+            requestAnimationFrame(checkAudioLevel);
+        };
+        checkAudioLevel();
+    } catch (e) {
+        console.error("Erro ao iniciar monitoramento de áudio", e);
+    }
+}
+
 // --- Lógica do WebRTC ---
 
 const rtcConfig = {
@@ -180,15 +218,12 @@ async function getLocalMicStream() {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         
         const micToggleBtn = document.getElementById('mic-toggle-btn');
-        const micIcon = document.getElementById('mic-icon');
-        const micOffIcon = document.getElementById('mic-off-icon');
         
-        if (micToggleBtn && micIcon && micOffIcon) {
-            micToggleBtn.style.display = 'flex';
-            micIcon.style.display = 'block';
-            micOffIcon.style.display = 'none';
+        if (micToggleBtn) {
+            micToggleBtn.style.display = 'block';
             micToggleBtn.classList.remove('muted');
         }
+        monitorSpeech(localStream, 'local');
         return localStream;
     } catch (error) {
         console.error("Erro ao obter acesso ao microfone:", error.name, error.message);
@@ -217,6 +252,7 @@ async function createPeerConnection(targetSid, isInitiator) {
     };
 
     pc.ontrack = (event) => {
+        if (event.track.kind !== 'audio') return;
         console.log(`Stream recebido de ${targetSid}`);
         let audioEl = document.getElementById(`peer-audio-${targetSid}`);
         if (!audioEl) {
@@ -227,6 +263,7 @@ async function createPeerConnection(targetSid, isInitiator) {
 
             const userItem = document.querySelector(`.user-item[data-sid="${targetSid}"]`);
             if (userItem) userItem.classList.add('peer-connected');
+            monitorSpeech(event.streams[0], targetSid);
         }
         audioEl.srcObject = event.streams[0];
     };
@@ -682,19 +719,12 @@ player.on('seeked', () => {
 document.addEventListener('click', (e) => {
     const micToggleBtn = e.target.closest('#mic-toggle-btn');
     if (micToggleBtn && localStream) {
-        const micIcon = document.getElementById('mic-icon');
-        const micOffIcon = document.getElementById('mic-off-icon');
-        
         const isMuted = micToggleBtn.classList.contains('muted');
         localStream.getAudioTracks().forEach(track => {
             track.enabled = isMuted; // Se estava mutado, habilita.
         });
         
         micToggleBtn.classList.toggle('muted');
-        if (micIcon && micOffIcon) {
-            micIcon.style.display = isMuted ? 'block' : 'none';
-            micOffIcon.style.display = isMuted ? 'none' : 'block';
-        }
         micToggleBtn.title = isMuted ? 'Mutar microfone' : 'Ativar microfone';
     }
 });
@@ -706,5 +736,28 @@ document.addEventListener('togglePeerMute', (e) => {
     if (audioEl && userItem) {
         audioEl.muted = !audioEl.muted;
         userItem.classList.toggle('peer-muted', audioEl.muted);
+        const muteBtn = userItem.querySelector('.peer-mute-btn');
+        if (muteBtn) {
+            muteBtn.classList.toggle('muted', audioEl.muted);
+        }
+    }
+});
+
+document.addEventListener('requestPeerPing', async (e) => {
+    const sid = e.detail.sid;
+    const pc = peerConnections[sid];
+    if (pc) {
+        try {
+            const stats = await pc.getStats();
+            let ping = null;
+            stats.forEach(report => {
+                if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                    ping = report.currentRoundTripTime ? report.currentRoundTripTime * 1000 : null;
+                }
+            });
+            document.dispatchEvent(new CustomEvent('receivePeerPing', { detail: { sid, ping } }));
+        } catch (err) {
+            document.dispatchEvent(new CustomEvent('receivePeerPing', { detail: { sid, ping: null } }));
+        }
     }
 });
