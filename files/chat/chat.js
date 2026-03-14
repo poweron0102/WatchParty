@@ -140,7 +140,7 @@ export async function initializeChat(socket, currentUserName, showNotification, 
         if (userItem.classList.contains('peer-connected')) {
             directConnectBtn.style.display = 'none';
             pingDisplay.style.display = 'block';
-            pingDisplay.textContent = 'Ping: Calculando...';
+            pingDisplay.innerHTML = 'Ping: Calculando...';
             document.dispatchEvent(new CustomEvent('requestPeerPing', { detail: { sid: sid } }));
         } else {
             directConnectBtn.style.display = 'block';
@@ -195,7 +195,28 @@ export async function initializeChat(socket, currentUserName, showNotification, 
 
     document.addEventListener('receivePeerPing', (e) => {
         if (selectedUserSid === e.detail.sid && pingDisplay && pingDisplay.style.display === 'block') {
-            pingDisplay.textContent = e.detail.ping !== null ? `Ping: ${Math.round(e.detail.ping)} ms` : 'Ping: Indisponível';
+            const stats = e.detail.stats;
+            if (stats) {
+                const pingText = stats.ping !== null ? `${Math.round(stats.ping)} ms` : '-- ms';
+                const typeMap = {
+                    'host': 'Local (LAN)',
+                    'srflx': 'STUN (Pública)',
+                    'prflx': 'P2P (Reflexiva)',
+                    'relay': 'TURN (Relay)'
+                };
+                const lType = typeMap[stats.localType] || stats.localType;
+                const rType = typeMap[stats.remoteType] || stats.remoteType;
+                
+                pingDisplay.innerHTML = `
+                    <div><strong>Ping:</strong> ${pingText}</div>
+                    <div style="font-size: 0.85em; margin-top: 6px; opacity: 0.85; line-height: 1.4;">
+                        <strong>Rota:</strong> ${lType} &harr; ${rType}<br>
+                        <strong>Proto:</strong> ${stats.protocol ? stats.protocol.toUpperCase() : '--'}
+                    </div>
+                `;
+            } else {
+                pingDisplay.innerHTML = 'Estatísticas Indisponíveis';
+            }
         }
     });
 

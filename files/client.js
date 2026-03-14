@@ -750,14 +750,37 @@ document.addEventListener('requestPeerPing', async (e) => {
         try {
             const stats = await pc.getStats();
             let ping = null;
+            let localCandidateId = null;
+            let remoteCandidateId = null;
+
             stats.forEach(report => {
                 if (report.type === 'candidate-pair' && report.state === 'succeeded') {
                     ping = report.currentRoundTripTime ? report.currentRoundTripTime * 1000 : null;
+                    localCandidateId = report.localCandidateId;
+                    remoteCandidateId = report.remoteCandidateId;
                 }
             });
-            document.dispatchEvent(new CustomEvent('receivePeerPing', { detail: { sid, ping } }));
+            
+            let localType = 'Desconhecido';
+            let remoteType = 'Desconhecido';
+            let protocol = 'Desconhecido';
+
+            if (localCandidateId && remoteCandidateId) {
+                const localCandidate = stats.get(localCandidateId);
+                const remoteCandidate = stats.get(remoteCandidateId);
+
+                if (localCandidate) {
+                    localType = localCandidate.candidateType;
+                    protocol = localCandidate.protocol;
+                }
+                if (remoteCandidate) {
+                    remoteType = remoteCandidate.candidateType;
+                }
+            }
+
+            document.dispatchEvent(new CustomEvent('receivePeerPing', { detail: { sid, stats: { ping, localType, remoteType, protocol } } }));
         } catch (err) {
-            document.dispatchEvent(new CustomEvent('receivePeerPing', { detail: { sid, ping: null } }));
+            document.dispatchEvent(new CustomEvent('receivePeerPing', { detail: { sid, stats: null } }));
         }
     }
 });
