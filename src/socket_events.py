@@ -60,6 +60,19 @@ async def send_message(sid, message_text):
 
 # --- Eventos de Sincronização (Apenas Host) ---
 
+@sio.on("transfer_host")
+async def handle_transfer_host(sid, new_host_sid):
+    if server_state["host_sid"] == sid:
+        if new_host_sid in server_state["users"]:
+            server_state["host_sid"] = new_host_sid
+            server_state["users"][sid]["isHost"] = False
+            server_state["users"][new_host_sid]["isHost"] = True
+            
+            await sio.emit('set_host', to=new_host_sid)
+            await sio.emit('remove_host', to=sid)
+            
+            await sio.emit('update_users', server_state["users"])
+
 @sio.on("host_set_video")
 async def set_video(sid, video_name):
     print(f"Host ou painel de host definiu o vídeo para: {video_name}")

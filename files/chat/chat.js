@@ -1,5 +1,5 @@
 
-export async function initializeChat(socket, currentUserName, showNotification) {
+export async function initializeChat(socket, currentUserName, showNotification, getIsHost) {
     // 1. Carrega o HTML do chat no container
     const chatContainer = document.getElementById('chat-container');
     if (!chatContainer) {
@@ -21,6 +21,10 @@ export async function initializeChat(socket, currentUserName, showNotification) 
     const chatInput = document.getElementById('chat-input');
     const sendBtn = document.getElementById('send-btn');
     const userList = document.getElementById('user-list');
+    
+    const contextMenu = document.getElementById('user-context-menu');
+    const transferHostBtn = document.getElementById('transfer-host-btn');
+    const directConnectBtn = document.getElementById('direct-connect-btn');
 
     // 3. Lógica do Módulo
 
@@ -116,6 +120,59 @@ export async function initializeChat(socket, currentUserName, showNotification) 
      }
     });
 
+    // --- Lógica do Menu de Contexto do Usuário ---
+    let selectedUserSid = null;
+    
+    function showUserContextMenu(e, sid, user) {
+        if (sid === socket.id) return; // Não mostrar para si mesmo
+        
+        selectedUserSid = sid;
+        
+        if (getIsHost && getIsHost()) {
+            transferHostBtn.style.display = 'block';
+        } else {
+            transferHostBtn.style.display = 'none';
+        }
+        
+        contextMenu.style.display = 'flex';
+        
+        const sidebarRect = sidebar.getBoundingClientRect();
+        let top = e.clientY - sidebarRect.top;
+        let left = e.clientX - sidebarRect.left;
+        
+        contextMenu.style.top = `${top}px`;
+        contextMenu.style.left = `${left}px`;
+        
+        // Ajuste caso o menu acabe saindo da área delimitada da sidebar
+        setTimeout(() => {
+            const menuRect = contextMenu.getBoundingClientRect();
+            if (menuRect.right > sidebarRect.right) {
+                contextMenu.style.left = `${left - menuRect.width}px`;
+            }
+            if (menuRect.bottom > sidebarRect.bottom) {
+                contextMenu.style.top = `${top - menuRect.height}px`;
+            }
+        }, 0);
+    }
+    
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.user-item') && !e.target.closest('#user-context-menu')) {
+            contextMenu.style.display = 'none';
+        }
+    });
+    
+    transferHostBtn.addEventListener('click', () => {
+        if (selectedUserSid) {
+            socket.emit('transfer_host', selectedUserSid);
+            contextMenu.style.display = 'none';
+        }
+    });
+    
+    directConnectBtn.addEventListener('click', () => {
+        showNotification('Conexão direta ainda não implementada.', 'info');
+        contextMenu.style.display = 'none';
+    });
+
     // --- Listeners de Eventos do Socket.IO ---
     socket.on('update_users', (users) => {
      userList.innerHTML = '';
@@ -128,6 +185,11 @@ export async function initializeChat(socket, currentUserName, showNotification) 
          }
          const pfpImg = user.pfp ? `<img src="${user.pfp}" alt="pfp" class="user-pfp">` : '';
          li.innerHTML = `${pfpImg} ${user.name}`;
+         
+         li.addEventListener('click', (e) => {
+             showUserContextMenu(e, sid, user);
+         });
+         
          userList.appendChild(li);
      }
     });

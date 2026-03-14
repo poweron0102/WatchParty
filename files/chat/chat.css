@@ -82,6 +82,7 @@
     justify-content: space-around;
     width: 120px;
     height: 120px;
+    cursor: pointer;
 }
 .user-item .user-pfp {
     width: 65px;
@@ -108,3 +109,31 @@
 #send-btn svg { width: 20px; height: 20px; vertical-align: middle; }
 
 .chat-msg .user-pfp { width: 24px; height: 24px; border-radius: 50%; vertical-align: middle; margin-right: 8px; }
+
+#user-context-menu {
+    position: absolute;
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    z-index: 100;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+#user-context-menu button {
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    padding: 8px 12px;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+#user-context-menu button:hover {
+    background-color: var(--bg-secondary);
+}

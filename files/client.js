@@ -113,7 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // --- Inicializa o Módulo de Chat ---
-initializeChat(socket, userName, showNotification);
+initializeChat(socket, userName, showNotification, () => isHost);
 
 // --- Funções de UI ---
 function updateStatusIndicator() {
@@ -132,6 +132,12 @@ socket.on('set_host', () => {
     updateStatusIndicator();
     console.log("Você foi definido como o HOST!");
     // Oculta o botão do painel do host se o usuário não for o host
+});
+
+socket.on('remove_host', () => {
+    isHost = false;
+    updateStatusIndicator();
+    console.log("Você não é mais o HOST!");
 });
 
 socket.on('update_users', (users) => {
