@@ -53,7 +53,7 @@ async def send_message(sid, message_text):
     message_data = {
         "sender": user_info.get("name", "Guest"),
         "pfp": user_info.get("pfp", ""),
-        "text": message_text  # Lembre-se de sanitizar HTML em produção
+        "text": message_text
     }
     await sio.emit('new_message', message_data)
 
