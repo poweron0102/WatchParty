@@ -45,6 +45,9 @@ async def disconnect(sid):
 
     # Atualiza a lista de usuários para todos
     await sio.emit('update_users', server_state["users"])
+    
+    # Notifica os outros que este usuário saiu, para limpar conexões WebRTC
+    await sio.emit('peer_disconnected', {'sid': sid}, skip_sid=sid)
 
 
 @sio.event
@@ -72,6 +75,19 @@ async def handle_transfer_host(sid, new_host_sid):
             await sio.emit('remove_host', to=sid)
             
             await sio.emit('update_users', server_state["users"])
+
+@sio.on("webrtc_signal")
+async def handle_webrtc_signal(sid, data):
+    """
+    Encaminha sinais WebRTC (ofertas, respostas, candidatos)
+    para um cliente alvo específico.
+    data = {"target_sid": "...", "payload": {...}}
+    """
+    target_sid = data.get("target_sid")
+    if target_sid and target_sid in server_state["users"]:
+        payload = data.get("payload", {})
+        payload["sender_sid"] = sid
+        await sio.emit('webrtc_signal', payload, to=target_sid)
 
 @sio.on("host_set_video")
 async def set_video(sid, video_name):

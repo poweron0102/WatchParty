@@ -25,6 +25,7 @@ export async function initializeChat(socket, currentUserName, showNotification, 
     const contextMenu = document.getElementById('user-context-menu');
     const transferHostBtn = document.getElementById('transfer-host-btn');
     const directConnectBtn = document.getElementById('direct-connect-btn');
+    const togglePeerMuteBtn = document.getElementById('toggle-peer-mute-btn');
 
     // 3. Lógica do Módulo
 
@@ -134,6 +135,19 @@ export async function initializeChat(socket, currentUserName, showNotification, 
             transferHostBtn.style.display = 'none';
         }
         
+        // Lógica para botões de WebRTC
+        const userItem = e.currentTarget;
+        if (userItem.classList.contains('peer-connected')) {
+            directConnectBtn.style.display = 'none';
+            togglePeerMuteBtn.style.display = 'block';
+            const isMuted = userItem.classList.contains('peer-muted');
+            togglePeerMuteBtn.textContent = isMuted ? 'Desmutar Áudio' : 'Mutar Áudio';
+        } else {
+            directConnectBtn.style.display = 'block';
+            togglePeerMuteBtn.style.display = 'none';
+        }
+
+        
         contextMenu.style.display = 'flex';
         
         const sidebarRect = sidebar.getBoundingClientRect();
@@ -169,8 +183,21 @@ export async function initializeChat(socket, currentUserName, showNotification, 
     });
     
     directConnectBtn.addEventListener('click', () => {
-        showNotification('Conexão direta ainda não implementada.', 'info');
-        contextMenu.style.display = 'none';
+        if (selectedUserSid) {
+            socket.emit('webrtc_signal', {
+                target_sid: selectedUserSid,
+                payload: { type: 'request', from_name: currentUserName }
+            });
+            showNotification(`Pedido de conexão direta enviado.`, 'info');
+            contextMenu.style.display = 'none';
+        }
+    });
+
+    togglePeerMuteBtn.addEventListener('click', () => {
+        if (selectedUserSid) {
+            document.dispatchEvent(new CustomEvent('togglePeerMute', { detail: { sid: selectedUserSid } }));
+            contextMenu.style.display = 'none';
+        }
     });
 
     // --- Listeners de Eventos do Socket.IO ---
@@ -185,6 +212,7 @@ export async function initializeChat(socket, currentUserName, showNotification, 
          }
          const pfpImg = user.pfp ? `<img src="${user.pfp}" alt="pfp" class="user-pfp">` : '';
          li.innerHTML = `${pfpImg} ${user.name}`;
+         li.dataset.sid = sid; // Adiciona SID para manipulação externa (WebRTC UI)
          
          li.addEventListener('click', (e) => {
              showUserContextMenu(e, sid, user);

@@ -14,6 +14,9 @@ const audioControlsContainer = document.getElementById('audio-controls-container
 const dubSelector = document.getElementById('dub-selector');
 const dubVolume = document.getElementById('dub-volume');
 const dubDelayInput = document.getElementById('dub-delay');
+const hostPanel = document.getElementById('host-panel');
+const screenShareBtn = document.getElementById('screen-share-btn');
+const closeHostPanelBtn = document.getElementById('close-host-panel-btn');
 
 
 // --- Estado do Cliente ---
@@ -21,6 +24,14 @@ let isHost = false;
 let isSyncing = false; // Flag para evitar loops de eventos
 let syncInterval = null; // intervalo de sincronização
 let syncRequestTime = 0; // Para calcular o ping
+
+// --- Estado do WebRTC ---
+const peerConnections = {}; // { sid: RTCPeerConnection }
+let localStream = null; // Nosso stream de microfone
+const peerAudioContainer = document.createElement('div');
+peerAudioContainer.id = 'peer-audio-container';
+document.body.appendChild(peerAudioContainer);
+
 let clientState = { users: {} }; // Para rastrear o estado e detectar mudanças
 
 // --- Pega dados do "Login" ---
@@ -84,7 +95,7 @@ function isVideoFromYoutube(videoURL) {
 
 const notificationContainer = createNotificationContainer();
 
-function showNotification(message, type = 'info') {
+function showNotification(message, type = 'info', actions = []) {
     const notification = document.createElement('div');
     notification.className = `notification ${type}`;
 
@@ -99,12 +110,37 @@ function showNotification(message, type = 'info') {
         <div class="notification-content">${message}</div>
     `;
 
+    if (actions.length > 0) {
+        const actionsContainer = document.createElement('div');
+        actionsContainer.className = 'notification-actions';
+        actions.forEach(action => {
+            const button = document.createElement('button');
+            button.className = `notification-action-btn ${action.className || ''}`;
+            button.textContent = action.text;
+            button.onclick = (e) => {
+                e.stopPropagation();
+                action.callback();
+                notification.remove();
+            };
+            actionsContainer.appendChild(button);
+        });
+        notification.appendChild(actionsContainer);
+    }
+
     notificationContainer.appendChild(notification);
 
-    // Remove a notificação após a animação de fadeOut terminar (5s)
-    setTimeout(() => {
-        notification.remove();
-    }, 5000);
+    // Apenas auto-remove se não houver ações
+    if (actions.length === 0) {
+        setTimeout(() => {
+            notification.remove();
+        }, 5000);
+    } else {
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'notification-close-btn';
+        closeBtn.innerHTML = '&times;';
+        closeBtn.onclick = () => notification.remove();
+        notification.appendChild(closeBtn);
+    }
 }
 
 // Exemplo de notificação ao entrar
@@ -125,13 +161,124 @@ function updateStatusIndicator() {
     }
 }
 
+// --- Lógica do WebRTC ---
+
+const rtcConfig = {
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] // Servidor STUN público do Google
+};
+
+async function getLocalMicStream() {
+    if (localStream) return localStream;
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        console.error("API de mídia bloqueada. O navegador exige HTTPS para acessar o microfone.");
+        showNotification("Acesso negado: O navegador exige uma conexão segura (HTTPS) para o microfone.", "warning");
+        return null;
+    }
+
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        
+        const micToggleBtn = document.getElementById('mic-toggle-btn');
+        const micIcon = document.getElementById('mic-icon');
+        const micOffIcon = document.getElementById('mic-off-icon');
+        
+        if (micToggleBtn && micIcon && micOffIcon) {
+            micToggleBtn.style.display = 'flex';
+            micIcon.style.display = 'block';
+            micOffIcon.style.display = 'none';
+            micToggleBtn.classList.remove('muted');
+        }
+        return localStream;
+    } catch (error) {
+        console.error("Erro ao obter acesso ao microfone:", error.name, error.message);
+        showNotification(`Não foi possível acessar o microfone: ${error.message || 'Permissão negada'}.`, "warning");
+        return null;
+    }
+}
+
+async function createPeerConnection(targetSid, isInitiator) {
+    console.log(`Criando conexão com ${targetSid}. Iniciador: ${isInitiator}`);
+    const stream = await getLocalMicStream();
+    if (!stream) return;
+
+    const pc = new RTCPeerConnection(rtcConfig);
+    peerConnections[targetSid] = pc;
+
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+    pc.onicecandidate = (event) => {
+        if (event.candidate) {
+            socket.emit('webrtc_signal', {
+                target_sid: targetSid,
+                payload: { type: 'ice_candidate', candidate: event.candidate }
+            });
+        }
+    };
+
+    pc.ontrack = (event) => {
+        console.log(`Stream recebido de ${targetSid}`);
+        let audioEl = document.getElementById(`peer-audio-${targetSid}`);
+        if (!audioEl) {
+            audioEl = document.createElement('audio');
+            audioEl.id = `peer-audio-${targetSid}`;
+            audioEl.autoplay = true;
+            peerAudioContainer.appendChild(audioEl);
+
+            const userItem = document.querySelector(`.user-item[data-sid="${targetSid}"]`);
+            if (userItem) userItem.classList.add('peer-connected');
+        }
+        audioEl.srcObject = event.streams[0];
+    };
+
+    pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'disconnected' || pc.connectionState === 'closed' || pc.connectionState === 'failed') {
+            closePeerConnection(targetSid);
+        }
+    };
+
+    if (isInitiator) {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit('webrtc_signal', {
+            target_sid: targetSid,
+            payload: { type: 'offer', sdp: pc.localDescription }
+        });
+    }
+}
+
+function closePeerConnection(sid) {
+    if (peerConnections[sid]) {
+        peerConnections[sid].close();
+        delete peerConnections[sid];
+
+        const audioEl = document.getElementById(`peer-audio-${sid}`);
+        if (audioEl) audioEl.remove();
+
+        const userItem = document.querySelector(`.user-item[data-sid="${sid}"]`);
+        if (userItem) {
+            userItem.classList.remove('peer-connected', 'peer-muted');
+        }
+        console.log(`Conexão com ${sid} fechada.`);
+    }
+    if (Object.keys(peerConnections).length === 0) {
+        const micToggleBtn = document.getElementById('mic-toggle-btn');
+        if (micToggleBtn) micToggleBtn.style.display = 'none';
+        if (localStream) {
+            localStream.getTracks().forEach(track => track.stop());
+            localStream = null;
+        }
+    }
+}
+
 // --- Listeners de Eventos do Socket.IO ---
 
 socket.on('set_host', () => {
     isHost = true;
     updateStatusIndicator();
     console.log("Você foi definido como o HOST!");
-    // Oculta o botão do painel do host se o usuário não for o host
+    statusIndicator.classList.add('is-host');
+    statusIndicator.title = "Abrir painel do host";
 });
 
 socket.on('remove_host', () => {
@@ -139,6 +286,8 @@ socket.on('remove_host', () => {
     updateStatusIndicator();
     console.log("Você não é mais o HOST!");
 });
+
+
 
 socket.on('update_users', (users) => {
     const previousUsers = clientState.users;
@@ -278,6 +427,12 @@ socket.on('sync_event', (data) => {
     try {
         switch(data.type) {
             case 'set_video':
+                // Se um vídeo normal for definido, para qualquer stream de tela
+                if (player.media.srcObject) {
+                    player.media.srcObject.getTracks().forEach(track => track.stop());
+                    player.media.srcObject = null;
+                }
+
                 if (data.video.startsWith('http')) {
 
                     if (isVideoFromYoutube(data.video)) {
@@ -336,6 +491,11 @@ socket.on('sync_event', (data) => {
     setTimeout(() => { isSyncing = false; }, 500);
 });
 
+socket.on('peer_disconnected', (data) => {
+    console.log(`Peer ${data.sid} desconectado. Limpando conexão.`);
+    closePeerConnection(data.sid);
+});
+
 // Evento para corrigir o tempo do cliente caso ele saia de sincronia
 socket.on('force_sync', (data) => {
     if (isHost || isSyncing) return;
@@ -375,6 +535,99 @@ socket.on('get_host_time', (callback) => {
     }
 });
 
+// --- Lógica de Sinalização WebRTC ---
+socket.on('webrtc_signal', async (payload) => {
+    const senderSid = payload.sender_sid;
+    if (!senderSid) return;
+
+    console.log('Sinal WebRTC recebido:', payload.type, 'de', senderSid);
+
+    switch (payload.type) {
+        case 'request':
+            showNotification(`${payload.from_name} quer estabelecer uma conexão de áudio.`, 'info', [
+                {
+                    text: 'Aceitar',
+                    className: 'primary',
+                    callback: async () => {
+                        socket.emit('webrtc_signal', {
+                            target_sid: senderSid,
+                            payload: { type: 'request_accepted', from_name: userName }
+                        });
+                        await createPeerConnection(senderSid, false); // Não é o iniciador
+                    }
+                },
+                {
+                    text: 'Recusar',
+                    callback: () => {
+                        socket.emit('webrtc_signal', {
+                            target_sid: senderSid,
+                            payload: { type: 'request_declined', from_name: userName }
+                        });
+                    }
+                }
+            ]);
+            break;
+
+        case 'request_accepted':
+            showNotification(`${payload.from_name} aceitou seu pedido. Iniciando conexão...`, 'success');
+            await createPeerConnection(senderSid, true); // É o iniciador
+            break;
+
+        case 'request_declined':
+            showNotification(`${payload.from_name} recusou seu pedido.`, 'warning');
+            break;
+
+        case 'offer':
+            if (peerConnections[senderSid]) {
+                await peerConnections[senderSid].setRemoteDescription(new RTCSessionDescription(payload.sdp));
+                const answer = await peerConnections[senderSid].createAnswer();
+                await peerConnections[senderSid].setLocalDescription(answer);
+                socket.emit('webrtc_signal', {
+                    target_sid: senderSid,
+                    payload: { type: 'answer', sdp: peerConnections[senderSid].localDescription }
+                });
+            }
+            break;
+
+        case 'answer':
+            if (peerConnections[senderSid]) {
+                await peerConnections[senderSid].setRemoteDescription(new RTCSessionDescription(payload.sdp));
+            }
+            break;
+
+        case 'ice_candidate':
+            if (peerConnections[senderSid] && peerConnections[senderSid].remoteDescription) {
+                try {
+                    await peerConnections[senderSid].addIceCandidate(new RTCIceCandidate(payload.candidate));
+                } catch (e) {
+                    console.error('Erro ao adicionar candidato ICE:', e);
+                }
+            }
+            break;
+    }
+});
+
+// --- Lógica do Painel do Host e Transmissão de Tela ---
+statusIndicator.addEventListener('click', () => {
+    if (isHost) {
+        hostPanel.style.display = 'block';
+    }
+});
+
+closeHostPanelBtn.addEventListener('click', () => {
+    hostPanel.style.display = 'none';
+});
+
+screenShareBtn.addEventListener('click', async () => {
+    showNotification('A transmissão de tela ainda não foi implementada.', 'info');
+    hostPanel.style.display = 'none';
+    // try {
+    //     screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    //     socket.emit('host_set_video', 'screen-share');
+    // } catch (error) {
+    //     showNotification("Não foi possível iniciar a transmissão de tela.", "warning");
+    // }
+});
 
 // --- Listeners de Eventos do Player ---
 
@@ -421,5 +674,37 @@ player.on('seeked', () => {
         console.log("Host buscou (Seek)");
         dubPlayer.currentTime = player.currentTime + parseFloat(dubDelayInput.value);
         socket.emit('host_sync', { type: 'seek', time: player.currentTime });
+    }
+});
+
+// --- Listeners de UI para WebRTC ---
+
+document.addEventListener('click', (e) => {
+    const micToggleBtn = e.target.closest('#mic-toggle-btn');
+    if (micToggleBtn && localStream) {
+        const micIcon = document.getElementById('mic-icon');
+        const micOffIcon = document.getElementById('mic-off-icon');
+        
+        const isMuted = micToggleBtn.classList.contains('muted');
+        localStream.getAudioTracks().forEach(track => {
+            track.enabled = isMuted; // Se estava mutado, habilita.
+        });
+        
+        micToggleBtn.classList.toggle('muted');
+        if (micIcon && micOffIcon) {
+            micIcon.style.display = isMuted ? 'block' : 'none';
+            micOffIcon.style.display = isMuted ? 'none' : 'block';
+        }
+        micToggleBtn.title = isMuted ? 'Mutar microfone' : 'Ativar microfone';
+    }
+});
+
+document.addEventListener('togglePeerMute', (e) => {
+    const sid = e.detail.sid;
+    const audioEl = document.getElementById(`peer-audio-${sid}`);
+    const userItem = document.querySelector(`.user-item[data-sid="${sid}"]`);
+    if (audioEl && userItem) {
+        audioEl.muted = !audioEl.muted;
+        userItem.classList.toggle('peer-muted', audioEl.muted);
     }
 });

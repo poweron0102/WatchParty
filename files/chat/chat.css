@@ -106,6 +106,12 @@
 #chat-input:focus { outline: none; border-color: var(--accent-color); }
 #send-btn { border: none; background: var(--accent-color); color: white; padding: 0 15px; border-radius: 5px; cursor: pointer; transition: background-color 0.2s ease; }
 #send-btn:hover { background: var(--accent-hover); }
+#mic-toggle-btn { border: none; background: var(--bg-tertiary); color: var(--text-secondary); padding: 0 10px; border-radius: 5px; cursor: pointer; transition: background-color 0.2s ease; margin-right: 10px; }
+#mic-toggle-btn:hover { background: var(--border-color); }
+#mic-toggle-btn.muted #mic-icon { display: none; }
+#mic-toggle-btn.muted #mic-off-icon { display: inline-block !important; }
+#mic-toggle-btn svg { width: 20px; height: 20px; vertical-align: middle; }
+
 #send-btn svg { width: 20px; height: 20px; vertical-align: middle; }
 
 .chat-msg .user-pfp { width: 24px; height: 24px; border-radius: 50%; vertical-align: middle; margin-right: 8px; }
@@ -136,4 +142,53 @@
 
 #user-context-menu button:hover {
     background-color: var(--bg-secondary);
+}
+
+/* Estilos para Notificações com Ações */
+.notification {
+    position: relative;
+}
+
+.notification-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.notification-action-btn {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+    transition: background-color 0.2s ease;
+}
+
+.notification-action-btn:hover {
+    background-color: var(--border-color);
+}
+
+.notification-action-btn.primary {
+    background-color: var(--accent-color);
+    border-color: var(--accent-color);
+    color: white;
+}
+
+.notification-action-btn.primary:hover {
+    background-color: var(--accent-hover);
+}
+
+.notification-close-btn {
+    position: absolute;
+    top: 5px;
+    right: 10px;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1.5em;
+    cursor: pointer;
+    line-height: 1;
 }
