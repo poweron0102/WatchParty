@@ -201,6 +201,45 @@ function monitorSpeech(stream, sid) {
     }
 }
 
+// --- Helper: Priorizar IPv6 no SDP ---
+function setIPv6First(sdp) {
+    let lines = sdp.split('\r\n');
+    let candidates = [];
+    let out = [];
+    for (let line of lines) {
+        if (line.startsWith('a=candidate:')) {
+            candidates.push(line);
+        } else {
+            if (candidates.length > 0) {
+                // Ordena IPv6 para o topo dos candidatos locais do SDP
+                candidates.sort((a, b) => {
+                    let ipA = a.split(' ')[4];
+                    let ipB = b.split(' ')[4];
+                    let aIsV6 = ipA && ipA.includes(':');
+                    let bIsV6 = ipB && ipB.includes(':');
+                    return (aIsV6 === bIsV6) ? 0 : (aIsV6 ? -1 : 1);
+                });
+                out.push(...candidates);
+                candidates = [];
+            }
+            out.push(line);
+        }
+    }
+    // Caso o SDP termine com candidatos (incomum, mas seguro)
+    if (candidates.length > 0) {
+         candidates.sort((a, b) => {
+              let ipA = a.split(' ')[4];
+              let ipB = b.split(' ')[4];
+              let aIsV6 = ipA && ipA.includes(':');
+              let bIsV6 = ipB && ipB.includes(':');
+              return (aIsV6 === bIsV6) ? 0 : (aIsV6 ? -1 : 1);
+         });
+         out.push(...candidates);
+    }
+    return out.join('\r\n');
+}
+
+
 // --- Funções de Transmissão de Tela ---
 
 function closeScreenShareConnection(sid) {
@@ -249,10 +288,16 @@ async function createScreenShareConnection(targetSid, stream) {
 
     pc.onicecandidate = (event) => {
         if (event.candidate) {
-            socket.emit('webrtc_signal', {
+            const candidateStr = event.candidate.candidate;
+            const isIPv6 = candidateStr.split(' ')[4].includes(':');
+            const emitPayload = () => socket.emit('webrtc_signal', {
                 target_sid: targetSid,
                 payload: { type: 'ice_candidate', candidate: event.candidate, purpose: 'screen' }
             });
+
+            // Prioriza o envio de candidatos IPv6, atrasando o IPv4 em 300ms
+            if (isIPv6) emitPayload();
+            else setTimeout(emitPayload, 300);
         }
     };
 
@@ -261,6 +306,7 @@ async function createScreenShareConnection(targetSid, stream) {
     };
 
     const offer = await pc.createOffer();
+    offer.sdp = setIPv6First(offer.sdp); // Injeta prioridade no SDP
     await pc.setLocalDescription(offer);
     socket.emit('webrtc_signal', {
         target_sid: targetSid,
@@ -285,9 +331,9 @@ async function getLocalMicStream() {
 
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        
+
         const micToggleBtn = document.getElementById('mic-toggle-btn');
-        
+
         if (micToggleBtn) {
             micToggleBtn.style.display = 'block';
             micToggleBtn.classList.remove('muted');
@@ -313,10 +359,16 @@ async function createPeerConnection(targetSid, isInitiator) {
 
     pc.onicecandidate = (event) => {
         if (event.candidate) {
-            socket.emit('webrtc_signal', {
+            const candidateStr = event.candidate.candidate;
+            const isIPv6 = candidateStr.split(' ')[4].includes(':');
+            const emitPayload = () => socket.emit('webrtc_signal', {
                 target_sid: targetSid,
                 payload: { type: 'ice_candidate', candidate: event.candidate }
             });
+
+            // Prioriza o envio de candidatos IPv6, atrasando o IPv4 em 300ms
+            if (isIPv6) emitPayload();
+            else setTimeout(emitPayload, 300);
         }
     };
 
@@ -345,6 +397,7 @@ async function createPeerConnection(targetSid, isInitiator) {
 
     if (isInitiator) {
         const offer = await pc.createOffer();
+        offer.sdp = setIPv6First(offer.sdp); // Injeta prioridade no SDP
         await pc.setLocalDescription(offer);
         socket.emit('webrtc_signal', {
             target_sid: targetSid,
@@ -664,7 +717,7 @@ socket.on('initiate_screen_share_to_peer', async ({ target_sid }) => {
 
 socket.on('screen_share_stopped', () => {
     console.log("Servidor informou o fim da transmissão de tela.");
-    
+
     // Clientes limpam suas conexões e player
     if (!isHost) {
         if (player.media.srcObject) {
@@ -702,6 +755,19 @@ socket.on('webrtc_signal', async (payload) => {
                 pc = new RTCPeerConnection(rtcConfig);
                 screenSharePeerConnections[senderSid] = pc;
 
+                // Enviar candidatos de volta (Importante para que o túnel bidirecional funcione bem em NATs)
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        const isIPv6 = event.candidate.candidate.split(' ')[4].includes(':');
+                        const emitPayload = () => socket.emit('webrtc_signal', {
+                            target_sid: senderSid,
+                            payload: { type: 'ice_candidate', candidate: event.candidate, purpose: 'screen' }
+                        });
+                        if (isIPv6) emitPayload();
+                        else setTimeout(emitPayload, 300);
+                    }
+                };
+
                 pc.ontrack = (event) => {
                     console.log(`Stream de tela recebido de ${senderSid}`);
                     if (player.media.srcObject !== event.streams[0]) {
@@ -711,9 +777,10 @@ socket.on('webrtc_signal', async (payload) => {
                         player.play().catch(e => console.warn("Autoplay da tela falhou", e));
                     }
                 };
-                
+
                 await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
                 const answer = await pc.createAnswer();
+                answer.sdp = setIPv6First(answer.sdp); // Injeta prioridade no SDP
                 await pc.setLocalDescription(answer);
                 socket.emit('webrtc_signal', { target_sid: senderSid, payload: { type: 'answer', sdp: pc.localDescription, purpose: 'screen' } });
                 break;
@@ -769,6 +836,7 @@ socket.on('webrtc_signal', async (payload) => {
             if (peerConnections[senderSid]) {
                 await peerConnections[senderSid].setRemoteDescription(new RTCSessionDescription(payload.sdp));
                 const answer = await peerConnections[senderSid].createAnswer();
+                answer.sdp = setIPv6First(answer.sdp); // Injeta prioridade no SDP
                 await peerConnections[senderSid].setLocalDescription(answer);
                 socket.emit('webrtc_signal', {
                     target_sid: senderSid,
@@ -893,7 +961,7 @@ document.addEventListener('click', (e) => {
         localStream.getAudioTracks().forEach(track => {
             track.enabled = isMuted; // Se estava mutado, habilita.
         });
-        
+
         micToggleBtn.classList.toggle('muted');
         micToggleBtn.title = isMuted ? 'Mutar microfone' : 'Ativar microfone';
     }
@@ -930,10 +998,12 @@ document.addEventListener('requestPeerPing', async (e) => {
                     remoteCandidateId = report.remoteCandidateId;
                 }
             });
-            
+
             let localType = 'Desconhecido';
             let remoteType = 'Desconhecido';
             let protocol = 'Desconhecido';
+            let localIpVersion = 'Unknown';
+            let remoteIpVersion = 'Unknown';
 
             if (localCandidateId && remoteCandidateId) {
                 const localCandidate = stats.get(localCandidateId);
@@ -942,13 +1012,22 @@ document.addEventListener('requestPeerPing', async (e) => {
                 if (localCandidate) {
                     localType = localCandidate.candidateType;
                     protocol = localCandidate.protocol;
+                    const ip = localCandidate.address || localCandidate.ip || '';
+                    if (ip) localIpVersion = ip.includes(':') ? 'IPv6' : 'IPv4';
                 }
                 if (remoteCandidate) {
                     remoteType = remoteCandidate.candidateType;
+                    const ip = remoteCandidate.address || remoteCandidate.ip || '';
+                    if (ip) remoteIpVersion = ip.includes(':') ? 'IPv6' : 'IPv4';
                 }
             }
 
-            document.dispatchEvent(new CustomEvent('receivePeerPing', { detail: { sid, stats: { ping, localType, remoteType, protocol } } }));
+            document.dispatchEvent(new CustomEvent('receivePeerPing', {
+                detail: {
+                    sid,
+                    stats: { ping, localType, remoteType, protocol, localIpVersion, remoteIpVersion }
+                }
+            }));
         } catch (err) {
             document.dispatchEvent(new CustomEvent('receivePeerPing', { detail: { sid, stats: null } }));
         }

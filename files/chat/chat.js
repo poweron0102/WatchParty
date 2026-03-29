@@ -1,4 +1,3 @@
-
 export async function initializeChat(socket, currentUserName, showNotification, getIsHost) {
     // 1. Carrega o HTML do chat no container
     const chatContainer = document.getElementById('chat-container');
@@ -21,7 +20,7 @@ export async function initializeChat(socket, currentUserName, showNotification, 
     const chatInput = document.getElementById('chat-input');
     const sendBtn = document.getElementById('send-btn');
     const userList = document.getElementById('user-list');
-    
+
     const contextMenu = document.getElementById('user-context-menu');
     const transferHostBtn = document.getElementById('transfer-host-btn');
     const directConnectBtn = document.getElementById('direct-connect-btn');
@@ -123,18 +122,18 @@ export async function initializeChat(socket, currentUserName, showNotification, 
 
     // --- Lógica do Menu de Contexto do Usuário ---
     let selectedUserSid = null;
-    
+
     function showUserContextMenu(e, sid, user) {
         if (sid === socket.id) return; // Não mostrar para si mesmo
-        
+
         selectedUserSid = sid;
-        
+
         if (getIsHost && getIsHost()) {
             transferHostBtn.style.display = 'block';
         } else {
             transferHostBtn.style.display = 'none';
         }
-        
+
         // Lógica para botões de WebRTC
         const userItem = e.currentTarget;
         if (userItem.classList.contains('peer-connected')) {
@@ -147,16 +146,16 @@ export async function initializeChat(socket, currentUserName, showNotification, 
             pingDisplay.style.display = 'none';
         }
 
-        
+
         contextMenu.style.display = 'flex';
-        
+
         const sidebarRect = sidebar.getBoundingClientRect();
         let top = e.clientY - sidebarRect.top;
         let left = e.clientX - sidebarRect.left;
-        
+
         contextMenu.style.top = `${top}px`;
         contextMenu.style.left = `${left}px`;
-        
+
         // Ajuste caso o menu acabe saindo da área delimitada da sidebar
         setTimeout(() => {
             const menuRect = contextMenu.getBoundingClientRect();
@@ -168,20 +167,20 @@ export async function initializeChat(socket, currentUserName, showNotification, 
             }
         }, 0);
     }
-    
+
     document.addEventListener('click', (e) => {
         if (!e.target.closest('.user-item') && !e.target.closest('#user-context-menu')) {
             contextMenu.style.display = 'none';
         }
     });
-    
+
     transferHostBtn.addEventListener('click', () => {
         if (selectedUserSid) {
             socket.emit('transfer_host', selectedUserSid);
             contextMenu.style.display = 'none';
         }
     });
-    
+
     directConnectBtn.addEventListener('click', () => {
         if (selectedUserSid) {
             socket.emit('webrtc_signal', {
@@ -206,11 +205,15 @@ export async function initializeChat(socket, currentUserName, showNotification, 
                 };
                 const lType = typeMap[stats.localType] || stats.localType;
                 const rType = typeMap[stats.remoteType] || stats.remoteType;
-                
+
+                // Exibimos a versão do IP (IPv4 ou IPv6) ao lado da rota
+                const lIpVer = stats.localIpVersion || 'Unknown';
+                const rIpVer = stats.remoteIpVersion || 'Unknown';
+
                 pingDisplay.innerHTML = `
                     <div><strong>Ping:</strong> ${pingText}</div>
                     <div style="font-size: 0.85em; margin-top: 6px; opacity: 0.85; line-height: 1.4;">
-                        <strong>Rota:</strong> ${lType} &harr; ${rType}<br>
+                        <strong>Rota:</strong> ${lType} (${lIpVer}) &harr; ${rType} (${rIpVer})<br>
                         <strong>Proto:</strong> ${stats.protocol ? stats.protocol.toUpperCase() : '--'}
                     </div>
                 `;
