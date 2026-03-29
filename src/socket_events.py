@@ -16,25 +16,43 @@ async def join_room(sid, data):
     if server_state["host_sid"] is None:
         server_state["host_sid"] = sid
         server_state["users"][sid]["isHost"] = True
+        # Initialize screen sharing state for a new room
+        server_state["is_screen_sharing"] = False
         await sio.emit('set_host', to=sid)
 
     await sio.emit('update_users', server_state["users"])
 
-    await sio.emit('sync_state', {
-        "video": server_state["current_video"],
-        "time": server_state["current_time"],
-        "paused": server_state["is_paused"]
-    }, to=sid)
+    # If screen share is active, sync the new user to it
+    if server_state.get("is_screen_sharing"):
+        await sio.emit('sync_event', {
+            "type": "set_video",
+            "video": "screen-share"
+        }, to=sid)
+        # Tell host to start WebRTC connection to the new user
+        await sio.emit('initiate_screen_share_to_peer', {'target_sid': sid}, to=server_state["host_sid"])
+    else:
+        # Otherwise, send the normal video state
+        await sio.emit('sync_state', {
+            "video": server_state["current_video"],
+            "time": server_state["current_time"],
+            "paused": server_state["is_paused"]
+        }, to=sid)
 
 
 @sio.event
 async def disconnect(sid):
     print(f"Cliente desconectado: {sid}")
+    was_host = sid == server_state["host_sid"]
     if sid in server_state["users"]:
         del server_state["users"][sid]
 
     # Se o host saiu, elege um novo host (lógica simples)
-    if sid == server_state["host_sid"]:
+    if was_host:
+        if server_state.get("is_screen_sharing"):
+            server_state["is_screen_sharing"] = False
+            server_state["current_video"] = None
+            await sio.emit('screen_share_stopped')
+
         if server_state["users"]:
             new_host_sid = list(server_state["users"].keys())[0]
             server_state["host_sid"] = new_host_sid
@@ -42,6 +60,7 @@ async def disconnect(sid):
             await sio.emit('set_host', to=new_host_sid)
         else:
             server_state["host_sid"] = None  # Sala vazia
+            server_state["is_screen_sharing"] = False
 
     # Atualiza a lista de usuários para todos
     await sio.emit('update_users', server_state["users"])
@@ -82,6 +101,7 @@ async def handle_webrtc_signal(sid, data):
     Encaminha sinais WebRTC (ofertas, respostas, candidatos)
     para um cliente alvo específico.
     data = {"target_sid": "...", "payload": {...}}
+    The payload can now include a "purpose" to distinguish streams.
     """
     target_sid = data.get("target_sid")
     if target_sid and target_sid in server_state["users"]:
@@ -139,6 +159,36 @@ async def host_sync_event(sid, data):
 
     # Transmite o evento para todos, *exceto* o host que enviou
     await sio.emit('sync_event', data, skip_sid=sid)
+
+
+# --- Eventos de Transmissão de Tela ---
+
+@sio.on("start_screen_share")
+async def handle_start_screen_share(sid):
+    if sid != server_state.get("host_sid"):
+        return
+
+    print(f"Host {sid} iniciou a transmissão de tela.")
+    server_state["is_screen_sharing"] = True
+    server_state["current_video"] = "screen-share"
+    server_state["is_paused"] = False
+
+    # Notify all other clients that screen sharing has started
+    await sio.emit('sync_event', {"type": "set_video", "video": "screen-share"}, skip_sid=sid)
+
+    # Tell host to initiate WebRTC connection to each peer
+    for peer_sid in server_state["users"]:
+        if peer_sid != sid:
+            await sio.emit('initiate_screen_share_to_peer', {'target_sid': peer_sid}, to=sid)
+
+@sio.on("stop_screen_share")
+async def handle_stop_screen_share(sid):
+    if sid != server_state.get("host_sid"):
+        return
+    print(f"Host {sid} parou a transmissão de tela.")
+    server_state["is_screen_sharing"] = False
+    server_state["current_video"] = None
+    await sio.emit('screen_share_stopped')
 
 
 @sio.on("request_sync")

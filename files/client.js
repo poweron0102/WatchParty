@@ -27,8 +27,10 @@ let syncRequestTime = 0; // Para calcular o ping
 
 // --- Estado do WebRTC ---
 const peerConnections = {}; // { sid: RTCPeerConnection }
-let localStream = null; // Nosso stream de microfone
+let localStream = null; // Stream de microfone
+let screenStream = null; // Stream de tela
 const peerAudioContainer = document.createElement('div');
+const screenSharePeerConnections = {}; // { sid: RTCPeerConnection } para transmissão de tela
 peerAudioContainer.id = 'peer-audio-container';
 document.body.appendChild(peerAudioContainer);
 
@@ -197,6 +199,73 @@ function monitorSpeech(stream, sid) {
     } catch (e) {
         console.error("Erro ao iniciar monitoramento de áudio", e);
     }
+}
+
+// --- Funções de Transmissão de Tela ---
+
+function closeScreenShareConnection(sid) {
+    if (screenSharePeerConnections[sid]) {
+        screenSharePeerConnections[sid].close();
+        delete screenSharePeerConnections[sid];
+        console.log(`Conexão de tela com ${sid} fechada.`);
+    }
+}
+
+function stopScreenShare() {
+    if (!isHost || !screenStream) return;
+
+    console.log("Parando a transmissão de tela.");
+
+    screenStream.getTracks().forEach(track => track.stop());
+    screenStream = null;
+
+    // Limpa as conexões de transmissão de tela
+    for (const sid in screenSharePeerConnections) {
+        closeScreenShareConnection(sid);
+    }
+
+    // Reseta o player
+    player.media.srcObject = null;
+    player.source = { type: 'video', sources: [] };
+    player.pause();
+    player.muted = false;
+
+    // Atualiza a UI do botão
+    screenShareBtn.classList.remove('sharing');
+    screenShareBtn.textContent = 'Transmitir Tela';
+
+    // Notifica o servidor
+    socket.emit('stop_screen_share');
+}
+
+async function createScreenShareConnection(targetSid, stream) {
+    console.log(`Iniciando transmissão de tela para ${targetSid}.`);
+    if (screenSharePeerConnections[targetSid]) closeScreenShareConnection(targetSid);
+
+    const pc = new RTCPeerConnection(rtcConfig);
+    screenSharePeerConnections[targetSid] = pc;
+
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+    pc.onicecandidate = (event) => {
+        if (event.candidate) {
+            socket.emit('webrtc_signal', {
+                target_sid: targetSid,
+                payload: { type: 'ice_candidate', candidate: event.candidate, purpose: 'screen' }
+            });
+        }
+    };
+
+    pc.onconnectionstatechange = () => {
+        if (['disconnected', 'closed', 'failed'].includes(pc.connectionState)) closeScreenShareConnection(targetSid);
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    socket.emit('webrtc_signal', {
+        target_sid: targetSid,
+        payload: { type: 'offer', sdp: pc.localDescription, purpose: 'screen' }
+    });
 }
 
 // --- Lógica do WebRTC ---
@@ -464,10 +533,21 @@ socket.on('sync_event', (data) => {
     try {
         switch(data.type) {
             case 'set_video':
-                // Se um vídeo normal for definido, para qualquer stream de tela
+                // Se o host definir um novo vídeo, ele para a transmissão de tela atual
+                if (isHost && screenStream) stopScreenShare();
+
                 if (player.media.srcObject) {
                     player.media.srcObject.getTracks().forEach(track => track.stop());
                     player.media.srcObject = null;
+                }
+
+                if (data.video === 'screen-share') {
+                    console.log("Iniciando modo de recepção de transmissão de tela.");
+                    showNotification("O host iniciou uma transmissão de tela.", "info");
+                    // A conexão WebRTC cuidará de definir o srcObject
+                    player.pause();
+                    player.source = { type: 'video', sources: [] }; // Limpa o player para receber o stream
+                    break;
                 }
 
                 if (data.video.startsWith('http')) {
@@ -531,6 +611,7 @@ socket.on('sync_event', (data) => {
 socket.on('peer_disconnected', (data) => {
     console.log(`Peer ${data.sid} desconectado. Limpando conexão.`);
     closePeerConnection(data.sid);
+    closeScreenShareConnection(data.sid);
 });
 
 // Evento para corrigir o tempo do cliente caso ele saia de sincronia
@@ -572,13 +653,83 @@ socket.on('get_host_time', (callback) => {
     }
 });
 
+// --- Eventos de Transmissão de Tela ---
+
+socket.on('initiate_screen_share_to_peer', async ({ target_sid }) => {
+    if (isHost && screenStream) {
+        console.log(`Servidor pediu para iniciar transmissão para ${target_sid}`);
+        await createScreenShareConnection(target_sid, screenStream);
+    }
+});
+
+socket.on('screen_share_stopped', () => {
+    console.log("Servidor informou o fim da transmissão de tela.");
+    
+    // Clientes limpam suas conexões e player
+    if (!isHost) {
+        if (player.media.srcObject) {
+            player.media.srcObject.getTracks().forEach(track => track.stop());
+            player.media.srcObject = null;
+        }
+        player.source = { type: 'video', sources: [] };
+        player.pause();
+        showNotification("A transmissão de tela terminou.", "info");
+    }
+
+    // Todos os clientes (não-hosts) devem limpar suas conexões de tela
+    for (const sid in screenSharePeerConnections) {
+        closeScreenShareConnection(sid);
+    }
+});
+
 // --- Lógica de Sinalização WebRTC ---
 socket.on('webrtc_signal', async (payload) => {
     const senderSid = payload.sender_sid;
     if (!senderSid) return;
 
-    console.log('Sinal WebRTC recebido:', payload.type, 'de', senderSid);
+    const purpose = payload.purpose || 'audio';
 
+    console.log(`Sinal WebRTC (${purpose}) recebido:`, payload.type, 'de', senderSid);
+
+    // --- Lógica para Transmissão de Tela ---
+    if (purpose === 'screen') {
+        let pc = screenSharePeerConnections[senderSid];
+
+        switch (payload.type) {
+            case 'offer': // Peer (não-host) recebe oferta do host
+                if (pc) closeScreenShareConnection(senderSid);
+
+                pc = new RTCPeerConnection(rtcConfig);
+                screenSharePeerConnections[senderSid] = pc;
+
+                pc.ontrack = (event) => {
+                    console.log(`Stream de tela recebido de ${senderSid}`);
+                    if (player.media.srcObject !== event.streams[0]) {
+                        player.source = { type: 'video', sources: [] };
+                        player.media.srcObject = event.streams[0];
+                        player.muted = false;
+                        player.play().catch(e => console.warn("Autoplay da tela falhou", e));
+                    }
+                };
+                
+                await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                socket.emit('webrtc_signal', { target_sid: senderSid, payload: { type: 'answer', sdp: pc.localDescription, purpose: 'screen' } });
+                break;
+
+            case 'answer': // Host recebe resposta do peer
+                if (pc) await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+                break;
+
+            case 'ice_candidate':
+                if (pc && pc.remoteDescription) await pc.addIceCandidate(new RTCIceCandidate(payload.candidate)).catch(e => console.error('Erro ao adicionar candidato ICE (tela):', e));
+                break;
+        }
+        return; // Fim da lógica de tela
+    }
+
+    // --- Lógica Original para Áudio ---
     switch (payload.type) {
         case 'request':
             showNotification(`${payload.from_name} quer estabelecer uma conexão de áudio.`, 'info', [
@@ -656,14 +807,33 @@ closeHostPanelBtn.addEventListener('click', () => {
 });
 
 screenShareBtn.addEventListener('click', async () => {
-    showNotification('A transmissão de tela ainda não foi implementada.', 'info');
     hostPanel.style.display = 'none';
-    // try {
-    //     screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-    //     socket.emit('host_set_video', 'screen-share');
-    // } catch (error) {
-    //     showNotification("Não foi possível iniciar a transmissão de tela.", "warning");
-    // }
+    if (screenStream) { // Se já estiver transmitindo, para.
+        stopScreenShare();
+        return;
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        screenStream = stream;
+
+        player.source = { type: 'video', sources: [] };
+        player.media.srcObject = screenStream;
+        player.muted = true; // Silenciar a reprodução local para evitar eco/feedback
+        player.play();
+
+        screenShareBtn.classList.add('sharing');
+        screenShareBtn.textContent = 'Parar Transmissão';
+
+        socket.emit('start_screen_share');
+
+        screenStream.getVideoTracks()[0].onended = () => stopScreenShare();
+
+    } catch (error) {
+        console.error("Erro ao iniciar a transmissão de tela:", error);
+        showNotification("Não foi possível iniciar a transmissão de tela. Permissão negada?", "warning");
+        if (screenStream) stopScreenShare();
+    }
 });
 
 // --- Listeners de Eventos do Player ---
