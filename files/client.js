@@ -1,13 +1,14 @@
-// /files/client.js
-
 import { initializeChat } from './chat/chat.js';
+import { showNotification } from './modules/notifications.js';
+import { setSocketIdGetter, closePeerConnection, handleAudioSignal } from './modules/webrtc.js';
+import { screenSharePeerConnections, closeScreenShareConnection, createScreenShareConnection,
+         stopScreenShare, getScreenStream, handleScreenSignal } from './modules/screen-share.js';
+import { syncState, setupDubListeners, handleSyncState, handleSyncEvent, handleForceSync } from './modules/video-sync.js';
+import { updateStatusIndicator, setupHostUI } from './modules/host-ui.js';
 
-// --- Conexão e Elementos DOM ---
+// --- DOM & State ---
 const socket = io();
-// Inicializa o Plyr. Ele substitui o elemento <video> padrão por um mais robusto.
-const player = new Plyr('#player', {
-    tooltips: { controls: true, seek: true }
-});
+const player = new Plyr('#player', { tooltips: { controls: true, seek: true } });
 const dubPlayer = document.getElementById('dub-player');
 const statusIndicator = document.getElementById('status-indicator');
 const audioControlsContainer = document.getElementById('audio-controls-container');
@@ -18,708 +19,94 @@ const hostPanel = document.getElementById('host-panel');
 const screenShareBtn = document.getElementById('screen-share-btn');
 const closeHostPanelBtn = document.getElementById('close-host-panel-btn');
 
+const isHostRef = { value: false };
+let clientState = { users: {} };
 
-// --- Estado do Cliente ---
-let isHost = false;
-let isSyncing = false; // Flag para evitar loops de eventos
-let syncInterval = null; // intervalo de sincronização
-let syncRequestTime = 0; // Para calcular o ping
-
-// --- Estado do WebRTC ---
-const peerConnections = {}; // { sid: RTCPeerConnection }
-let localStream = null; // Stream de microfone
-let screenStream = null; // Stream de tela
-const peerAudioContainer = document.createElement('div');
-const screenSharePeerConnections = {}; // { sid: RTCPeerConnection } para transmissão de tela
-peerAudioContainer.id = 'peer-audio-container';
-document.body.appendChild(peerAudioContainer);
-
-let clientState = { users: {} }; // Para rastrear o estado e detectar mudanças
-
-// --- Pega dados do "Login" ---
 const userName = sessionStorage.getItem('userName');
 const userPfp = sessionStorage.getItem('userPfp');
+if (!userName) window.location.href = '/';
 
-// Se não tiver nome, volta para a página inicial
-if (!userName) {
-    window.location.href = '/';
-}
-
-// --- Envia evento de "Entrar na Sala" ---
 socket.emit('join_room', { name: userName, pfp: userPfp });
 
-// --- Sistema de Notificações ---
-function createNotificationContainer() {
-    const container = document.createElement('div');
-    container.id = 'notification-container';
-    document.body.appendChild(container);
-    return container;
-}
+// Give webrtc.js access to the socket id for speech monitoring
+setSocketIdGetter(() => socket.id);
 
-function isVideoFromYoutube(videoURL) {
-    if (!videoURL || typeof videoURL !== 'string') return false;
-    let url = videoURL.trim();
-    // adiciona protocolo se ausente para permitir uso do URL parser
-    if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(url)) {
-        url = 'https://' + url;
-    }
-
-    try {
-        const u = new URL(url);
-        const host = u.hostname.toLowerCase();
-
-        // Hosts válidos do YouTube
-        const isYoutuBe = host === 'youtu.be' || host.endsWith('.youtu.be');
-        const isYoutubeDomain =
-            host === 'youtube.com' ||
-            host.endsWith('.youtube.com') ||
-            host === 'youtube-nocookie.com' ||
-            host.endsWith('.youtube-nocookie.com');
-
-        if (isYoutuBe) {
-            // youtu.be/<id>
-            return !!u.pathname.replace(/\//g, '');
-        }
-
-        if (!isYoutubeDomain) return false;
-
-        const path = u.pathname;
-        // youtube.com/watch?v=ID
-        if (u.searchParams.has('v')) return true;
-        // /embed/ID , /v/ID , /shorts/ID
-        return /^\/(embed|v|shorts)\/[^/]+/.test(path);
-
-    } catch (e) {
-        return false;
-    }
-}
-
-
-const notificationContainer = createNotificationContainer();
-
-function showNotification(message, type = 'info', actions = []) {
-    const notification = document.createElement('div');
-    notification.className = `notification ${type}`;
-
-    const icons = {
-        info: `<svg class="notification-icon" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>`,
-        success: `<svg class="notification-icon" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>`,
-        warning: `<svg class="notification-icon" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM10 5a1 1 0 011 1v3a1 1 0 11-2 0V6a1 1 0 011-1zm1 5a1 1 0 10-2 0v2a1 1 0 102 0v-2z" clip-rule="evenodd"></path></svg>`
-    };
-
-    notification.innerHTML = `
-        ${icons[type] || icons.info}
-        <div class="notification-content">${message}</div>
-    `;
-
-    if (actions.length > 0) {
-        const actionsContainer = document.createElement('div');
-        actionsContainer.className = 'notification-actions';
-        actions.forEach(action => {
-            const button = document.createElement('button');
-            button.className = `notification-action-btn ${action.className || ''}`;
-            button.textContent = action.text;
-            button.onclick = (e) => {
-                e.stopPropagation();
-                action.callback();
-                notification.remove();
-            };
-            actionsContainer.appendChild(button);
-        });
-        notification.appendChild(actionsContainer);
-    }
-
-    notificationContainer.appendChild(notification);
-
-    // Apenas auto-remove se não houver ações
-    if (actions.length === 0) {
-        setTimeout(() => {
-            notification.remove();
-        }, 5000);
-    } else {
-        const closeBtn = document.createElement('button');
-        closeBtn.className = 'notification-close-btn';
-        closeBtn.innerHTML = '&times;';
-        closeBtn.onclick = () => notification.remove();
-        notification.appendChild(closeBtn);
-    }
-}
-
-// Exemplo de notificação ao entrar
+// --- Module Setup ---
 document.addEventListener('DOMContentLoaded', () => {
     showNotification(`Bem-vindo à party, <strong>${userName}</strong>!`, 'success');
 });
 
-// --- Inicializa o Módulo de Chat ---
-initializeChat(socket, userName, showNotification, () => isHost);
+initializeChat(socket, userName, showNotification, () => isHostRef.value);
 
-// --- Funções de UI ---
-function updateStatusIndicator() {
-    if (isHost) {
-        statusIndicator.innerHTML = `<span class="host-label">⭐ Você é o Host</span>`;
-    } else {
-        // O texto do ping será atualizado pelo evento 'force_sync'
-        statusIndicator.innerHTML = `Ping: <span class="ping-value">-- ms</span>`;
-    }
-}
+setupDubListeners(dubSelector, dubVolume, dubDelayInput, dubPlayer, player);
 
-// --- Monitoramento de Voz ---
-function monitorSpeech(stream, sid) {
-    try {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const source = audioCtx.createMediaStreamSource(stream);
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 256;
-        analyser.smoothingTimeConstant = 0.5;
-        source.connect(analyser);
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        
-        const checkAudioLevel = () => {
-            if (sid !== 'local' && !peerConnections[sid]) return;
-            if (sid === 'local' && !localStream) {
-                const localItem = document.querySelector(`.user-item[data-sid="${socket.id}"]`);
-                if(localItem) localItem.classList.remove('is-speaking');
-                return;
-            }
-            
-            analyser.getByteFrequencyData(dataArray);
-            let sum = 0;
-            for(let i=0; i<dataArray.length; i++) sum += dataArray[i];
-            const average = sum / dataArray.length;
-            
-            const targetSid = sid === 'local' ? socket.id : sid;
-            const userItem = document.querySelector(`.user-item[data-sid="${targetSid}"]`);
-            if (userItem) {
-                if (average > 15) userItem.classList.add('is-speaking');
-                else userItem.classList.remove('is-speaking');
-            }
-            requestAnimationFrame(checkAudioLevel);
-        };
-        checkAudioLevel();
-    } catch (e) {
-        console.error("Erro ao iniciar monitoramento de áudio", e);
-    }
-}
+setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIndicator, hostPanel, screenShareBtn, closeHostPanelBtn, isHostRef });
 
-// --- Helper: Priorizar IPv6 no SDP ---
-function setIPv6First(sdp) {
-    let lines = sdp.split('\r\n');
-    let candidates = [];
-    let out = [];
-    for (let line of lines) {
-        if (line.startsWith('a=candidate:')) {
-            candidates.push(line);
-        } else {
-            if (candidates.length > 0) {
-                // Ordena IPv6 para o topo dos candidatos locais do SDP
-                candidates.sort((a, b) => {
-                    let ipA = a.split(' ')[4];
-                    let ipB = b.split(' ')[4];
-                    let aIsV6 = ipA && ipA.includes(':');
-                    let bIsV6 = ipB && ipB.includes(':');
-                    return (aIsV6 === bIsV6) ? 0 : (aIsV6 ? -1 : 1);
-                });
-                out.push(...candidates);
-                candidates = [];
-            }
-            out.push(line);
-        }
-    }
-    // Caso o SDP termine com candidatos (incomum, mas seguro)
-    if (candidates.length > 0) {
-         candidates.sort((a, b) => {
-              let ipA = a.split(' ')[4];
-              let ipB = b.split(' ')[4];
-              let aIsV6 = ipA && ipA.includes(':');
-              let bIsV6 = ipB && ipB.includes(':');
-              return (aIsV6 === bIsV6) ? 0 : (aIsV6 ? -1 : 1);
-         });
-         out.push(...candidates);
-    }
-    return out.join('\r\n');
-}
-
-
-// --- Funções de Transmissão de Tela ---
-
-function closeScreenShareConnection(sid) {
-    if (screenSharePeerConnections[sid]) {
-        screenSharePeerConnections[sid].close();
-        delete screenSharePeerConnections[sid];
-        console.log(`Conexão de tela com ${sid} fechada.`);
-    }
-}
-
-function stopScreenShare() {
-    if (!isHost || !screenStream) return;
-
-    console.log("Parando a transmissão de tela.");
-
-    screenStream.getTracks().forEach(track => track.stop());
-    screenStream = null;
-
-    // Limpa as conexões de transmissão de tela
-    for (const sid in screenSharePeerConnections) {
-        closeScreenShareConnection(sid);
-    }
-
-    // Reseta o player
-    player.media.srcObject = null;
-    player.source = { type: 'video', sources: [] };
-    player.pause();
-    player.muted = false;
-
-    // Atualiza a UI do botão
-    screenShareBtn.classList.remove('sharing');
-    screenShareBtn.textContent = 'Transmitir Tela';
-
-    // Notifica o servidor
-    socket.emit('stop_screen_share');
-}
-
-async function createScreenShareConnection(targetSid, stream) {
-    console.log(`Iniciando transmissão de tela para ${targetSid}.`);
-    if (screenSharePeerConnections[targetSid]) closeScreenShareConnection(targetSid);
-
-    const pc = new RTCPeerConnection(rtcConfig);
-    screenSharePeerConnections[targetSid] = pc;
-
-    stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-    pc.onicecandidate = (event) => {
-        if (event.candidate) {
-            const candidateStr = event.candidate.candidate;
-            const isIPv6 = candidateStr.split(' ')[4].includes(':');
-            const emitPayload = () => socket.emit('webrtc_signal', {
-                target_sid: targetSid,
-                payload: { type: 'ice_candidate', candidate: event.candidate, purpose: 'screen' }
-            });
-
-            // Prioriza o envio de candidatos IPv6, atrasando o IPv4 em 300ms
-            if (isIPv6) emitPayload();
-            else setTimeout(emitPayload, 300);
-        }
-    };
-
-    pc.onconnectionstatechange = () => {
-        if (['disconnected', 'closed', 'failed'].includes(pc.connectionState)) closeScreenShareConnection(targetSid);
-    };
-
-    const offer = await pc.createOffer();
-    offer.sdp = setIPv6First(offer.sdp); // Injeta prioridade no SDP
-    await pc.setLocalDescription(offer);
-    socket.emit('webrtc_signal', {
-        target_sid: targetSid,
-        payload: { type: 'offer', sdp: pc.localDescription, purpose: 'screen' }
-    });
-}
-
-// --- Lógica do WebRTC ---
-
-const rtcConfig = {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] // Servidor STUN público do Google
-};
-
-async function getLocalMicStream() {
-    if (localStream) return localStream;
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        console.error("API de mídia bloqueada. O navegador exige HTTPS para acessar o microfone.");
-        showNotification("Acesso negado: O navegador exige uma conexão segura (HTTPS) para o microfone.", "warning");
-        return null;
-    }
-
-    try {
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-
-        const micToggleBtn = document.getElementById('mic-toggle-btn');
-
-        if (micToggleBtn) {
-            micToggleBtn.style.display = 'block';
-            micToggleBtn.classList.remove('muted');
-        }
-        monitorSpeech(localStream, 'local');
-        return localStream;
-    } catch (error) {
-        console.error("Erro ao obter acesso ao microfone:", error.name, error.message);
-        showNotification(`Não foi possível acessar o microfone: ${error.message || 'Permissão negada'}.`, "warning");
-        return null;
-    }
-}
-
-async function createPeerConnection(targetSid, isInitiator) {
-    console.log(`Criando conexão com ${targetSid}. Iniciador: ${isInitiator}`);
-    const stream = await getLocalMicStream();
-    if (!stream) return;
-
-    const pc = new RTCPeerConnection(rtcConfig);
-    peerConnections[targetSid] = pc;
-
-    stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-    pc.onicecandidate = (event) => {
-        if (event.candidate) {
-            const candidateStr = event.candidate.candidate;
-            const isIPv6 = candidateStr.split(' ')[4].includes(':');
-            const emitPayload = () => socket.emit('webrtc_signal', {
-                target_sid: targetSid,
-                payload: { type: 'ice_candidate', candidate: event.candidate }
-            });
-
-            // Prioriza o envio de candidatos IPv6, atrasando o IPv4 em 300ms
-            if (isIPv6) emitPayload();
-            else setTimeout(emitPayload, 300);
-        }
-    };
-
-    pc.ontrack = (event) => {
-        if (event.track.kind !== 'audio') return;
-        console.log(`Stream recebido de ${targetSid}`);
-        let audioEl = document.getElementById(`peer-audio-${targetSid}`);
-        if (!audioEl) {
-            audioEl = document.createElement('audio');
-            audioEl.id = `peer-audio-${targetSid}`;
-            audioEl.autoplay = true;
-            peerAudioContainer.appendChild(audioEl);
-
-            const userItem = document.querySelector(`.user-item[data-sid="${targetSid}"]`);
-            if (userItem) userItem.classList.add('peer-connected');
-            monitorSpeech(event.streams[0], targetSid);
-        }
-        audioEl.srcObject = event.streams[0];
-    };
-
-    pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'disconnected' || pc.connectionState === 'closed' || pc.connectionState === 'failed') {
-            closePeerConnection(targetSid);
-        }
-    };
-
-    if (isInitiator) {
-        const offer = await pc.createOffer();
-        offer.sdp = setIPv6First(offer.sdp); // Injeta prioridade no SDP
-        await pc.setLocalDescription(offer);
-        socket.emit('webrtc_signal', {
-            target_sid: targetSid,
-            payload: { type: 'offer', sdp: pc.localDescription }
-        });
-    }
-}
-
-function closePeerConnection(sid) {
-    if (peerConnections[sid]) {
-        peerConnections[sid].close();
-        delete peerConnections[sid];
-
-        const audioEl = document.getElementById(`peer-audio-${sid}`);
-        if (audioEl) audioEl.remove();
-
-        const userItem = document.querySelector(`.user-item[data-sid="${sid}"]`);
-        if (userItem) {
-            userItem.classList.remove('peer-connected', 'peer-muted');
-        }
-        console.log(`Conexão com ${sid} fechada.`);
-    }
-    if (Object.keys(peerConnections).length === 0) {
-        const micToggleBtn = document.getElementById('mic-toggle-btn');
-        if (micToggleBtn) micToggleBtn.style.display = 'none';
-        if (localStream) {
-            localStream.getTracks().forEach(track => track.stop());
-            localStream = null;
-        }
-    }
-}
-
-// --- Listeners de Eventos do Socket.IO ---
-
+// --- Socket: Host Status ---
 socket.on('set_host', () => {
-    isHost = true;
-    updateStatusIndicator();
-    console.log("Você foi definido como o HOST!");
+    isHostRef.value = true;
+    updateStatusIndicator(statusIndicator, true);
     statusIndicator.classList.add('is-host');
-    statusIndicator.title = "Abrir painel do host";
+    statusIndicator.title = 'Abrir painel do host';
 });
 
 socket.on('remove_host', () => {
-    isHost = false;
-    updateStatusIndicator();
-    console.log("Você não é mais o HOST!");
+    isHostRef.value = false;
+    updateStatusIndicator(statusIndicator, false);
+    statusIndicator.classList.remove('is-host');
+    statusIndicator.title = '';
 });
-
-
 
 socket.on('update_users', (users) => {
     const previousUsers = clientState.users;
     const previousHostSid = Object.keys(previousUsers).find(sid => previousUsers[sid].isHost);
 
-    // Detectar novos usuários
     for (const sid in users) {
-        if (!previousUsers[sid]) {
-            // Não notificar a própria entrada
-            if (sid !== socket.id) {
-                showNotification(`<strong>${users[sid].name}</strong> entrou na sala.`, 'success');
-            }
+        if (!previousUsers[sid] && sid !== socket.id) {
+            showNotification(`<strong>${users[sid].name}</strong> entrou na sala.`, 'success');
         }
     }
 
-    // Detectar mudança de host
     const newHostSid = Object.keys(users).find(sid => users[sid].isHost);
-    if (newHostSid && newHostSid !== previousHostSid) {
-        const wasHost = isHost;
-        const newHostName = users[newHostSid].name;
-        // Não notificar se você se tornou o host (já tem o log no console)
-        if (newHostSid !== socket.id) {
-            showNotification(`<strong>${newHostName}</strong> agora é o host.`, 'warning');
-        }
-        if (wasHost && newHostSid !== socket.id) updateStatusIndicator();
+    if (newHostSid && newHostSid !== previousHostSid && newHostSid !== socket.id) {
+        showNotification(`<strong>${users[newHostSid].name}</strong> agora é o host.`, 'warning');
+        if (isHostRef.value && newHostSid !== socket.id) updateStatusIndicator(statusIndicator, false);
     }
 
-    clientState.users = users; // Atualiza o estado
+    clientState.users = users;
 });
 
-async function loadMediaTracks(videoPath) {
-    try {
-        const response = await fetch(`/api/get_subtitles/${videoPath}`);
-        console.log("Resposta do servidor:", response);
-        if (!response.ok) return { subtitles: [], dubs: [] };
-        const data = await response.json();
-        console.log("Resposta do servidor processada:", data);
-        return {
-            subtitles: data.subtitles || [],
-            dubs: data.dubs || []
-        };
-    } catch (error) {
-        console.error("Erro ao buscar faixas de mídia:", error);
-        return { subtitles: [], dubs: [] };
-    }
-}
-
-function setupDubControls(dubs) {
-    // Limpa opções anteriores
-    dubSelector.innerHTML = '';
-
-    if (dubs && dubs.length > 1) {
-        dubs.forEach(dub => {
-            const option = document.createElement('option');
-            option.value = dub.lang;
-            option.textContent = dub.label;
-            option.dataset.src = dub.src || ''; // Armazena a URL no dataset
-            dubSelector.appendChild(option);
-        });
-        audioControlsContainer.style.display = 'flex';
-    } else {
-        // Esconde os controles se não houver dublagens
-        audioControlsContainer.style.display = 'none';
-    }
-}
-
-dubSelector.addEventListener('change', (e) => {
-    const selectedOption = e.target.options[e.target.selectedIndex];
-    const src = selectedOption.dataset.src;
-
-    if (src) {
-        dubPlayer.src = src;
-        dubPlayer.currentTime = player.currentTime;
-        if (!player.paused) dubPlayer.play();
-        player.muted = true;
-    } else { // Áudio original
-        dubPlayer.src = '';
-        player.muted = false;
-    }
-});
-
-dubVolume.addEventListener('input', (e) => {
-    dubPlayer.volume = e.target.value;
-});
-
-dubDelayInput.addEventListener('change', (e) => {
-    // Ao mudar o delay, ajusta o tempo da dublagem imediatamente
-    dubPlayer.currentTime = player.currentTime + parseFloat(e.target.value);
-});
+// --- Socket: Video Sync ---
 socket.on('sync_state', (state) => {
-    console.log({state});
-    if (state.video) {
-        console.log(`Sincronizando com estado: ${state.video} @ ${state.time}s`);
-        isSyncing = true;
-
-        // Verifica se é uma URL do YouTube ou um arquivo local
-        if (state.video.startsWith('http')) {
-            player.source = {
-                type: 'video',
-                sources: [{ src: state.video, provider: 'youtube' }]
-            };
-        } else {
-            // Busca as legendas antes de configurar a fonte do player para arquivos locais
-            loadMediaTracks(state.video).then(({ subtitles, dubs }) => {
-                console.log("Legendas encontradas:", subtitles);
-                player.source = {
-                    type: 'video',
-                    sources: [{ src: `/video/${state.video}` }],
-                    tracks: subtitles
-                };
-                setupDubControls(dubs);
-            });
-        }
-
-        player.currentTime = state.time;
-        if (state.paused) {
-            player.pause();
-        } else {
-            // O play() pode falhar se o usuário não interagiu com a página ainda.
-            player.play().catch(() => console.warn('Autoplay bloqueado pelo navegador.'));
-        }
-        // Desativa a flag após um tempo para permitir o player "assentar" no novo estado
-        setTimeout(() => { isSyncing = false; }, 1000);
-    }
+    handleSyncState(state, player, dubSelector, audioControlsContainer);
 });
 
 socket.on('sync_event', (data) => {
-    // O host não deve reagir aos seus próprios eventos de play/pause/seek
-    if (isHost && ['play', 'pause', 'seek'].includes(data.type)) {
-        return;
-    }
-    console.log('Recebido evento de sync:', data);
-
-    // Ativa a flag para impedir que este evento dispare um novo evento de 'play/pause/seek'
-    isSyncing = true;
-
-    try {
-        switch(data.type) {
-            case 'set_video':
-                // Se o host definir um novo vídeo, ele para a transmissão de tela atual
-                if (isHost && screenStream) stopScreenShare();
-
-                if (player.media.srcObject) {
-                    player.media.srcObject.getTracks().forEach(track => track.stop());
-                    player.media.srcObject = null;
-                }
-
-                if (data.video === 'screen-share') {
-                    console.log("Iniciando modo de recepção de transmissão de tela.");
-                    showNotification("O host iniciou uma transmissão de tela.", "info");
-                    // A conexão WebRTC cuidará de definir o srcObject
-                    player.pause();
-                    player.source = { type: 'video', sources: [] }; // Limpa o player para receber o stream
-                    break;
-                }
-
-                if (data.video.startsWith('http')) {
-
-                    if (isVideoFromYoutube(data.video)) {
-                        player.source = {
-                            type: 'video',
-                            sources: [{src: data.video, provider: 'youtube'}]
-                        };
-                    }
-                    else {
-                        player.source = {
-                            type: 'video',
-                            sources: [{src: data.video}]
-                        };
-                    }
-
-                } else {
-                    // Busca as legendas e então atualiza o player para arquivos locais
-                    loadMediaTracks(data.video).then(({ subtitles, dubs }) => {
-                        console.log("Legendas encontradas:", subtitles);
-                        player.source = {
-                            type: 'video',
-                            sources: [{ src: `/video/${data.video}` }],
-                            tracks: subtitles
-                        };
-                        setupDubControls(dubs);
-                    });
-                }
-
-                player.pause();
-                player.currentTime = 0;
-                break;
-            case 'play':
-                // Sincroniza o player de dublagem também
-                if (!player.muted) dubPlayer.pause(); else dubPlayer.play();
-                player.play();
-                break;
-            case 'pause':
-                // Sincroniza o player de dublagem também
-                dubPlayer.pause();
-                player.pause();
-                break;
-            case 'seek':
-                // Só busca se a diferença for significativa (evita micro-ajustes)
-                if (Math.abs(player.currentTime - data.time) > 1.5) {
-                    player.currentTime = data.time;
-                }
-                // Sincroniza o tempo da dublagem aplicando o atraso definido pelo usuário
-                dubPlayer.currentTime = player.currentTime + parseFloat(dubDelayInput.value);
-                break;
-        }
-    } catch (e) {
-        console.error("Erro ao sincronizar player:", e);
-    }
-
-    // Desativa a flag após um tempo
-    setTimeout(() => { isSyncing = false; }, 500);
+    handleSyncEvent(data, player, dubPlayer, dubDelayInput, isHostRef, dubSelector, audioControlsContainer, getScreenStream, () => stopScreenShare(socket, player, screenShareBtn, isHostRef));
 });
 
-socket.on('peer_disconnected', (data) => {
-    console.log(`Peer ${data.sid} desconectado. Limpando conexão.`);
-    closePeerConnection(data.sid);
-    closeScreenShareConnection(data.sid);
-});
-
-// Evento para corrigir o tempo do cliente caso ele saia de sincronia
 socket.on('force_sync', (data) => {
-    if (isHost || isSyncing) return;
-
-    // Calcula a latência (ping) da requisição
-    const ping = Date.now() - syncRequestTime;
-    const latency = ping / 2; // Tempo de ida
-    const correctedTime = data.time + (latency / 1000); // Converte latência para segundos
-
-    console.log(`Sync forçado recebido. Tempo do Host: ${data.time.toFixed(2)}s, Ping: ${ping}ms, Tempo Corrigido: ${correctedTime.toFixed(2)}s`);
-    statusIndicator.innerHTML = `Ping: <span class="ping-value">${ping} ms</span>`;
-
-    // Só ajusta se a diferença for maior que 2 segundos para evitar "pulos"
-    if (Math.abs(player.currentTime - correctedTime) > 2) {
-        console.log(`Corrigindo tempo do vídeo de ${player.currentTime.toFixed(2)}s para ${correctedTime.toFixed(2)}s.`);
-        isSyncing = true;
-        player.currentTime = correctedTime;
-        // Garante que o estado de play/pause também seja sincronizado
-        if (data.paused && !player.paused) {
-            player.pause();
-        } else if (!data.paused && player.paused) {
-            player.play();
-        }
-        setTimeout(() => { isSyncing = false; }, 500);
-    }
+    handleForceSync(data, player, isHostRef, statusIndicator);
 });
 
-// --- Eventos Específicos do Host ---
-
-// O servidor pede o estado atual do host para sincronizar outro cliente
 socket.on('get_host_time', (callback) => {
-    if (isHost) {
-        callback({
-            time: player.currentTime,
-            paused: player.paused
-        });
-    }
+    if (isHostRef.value) callback({ time: player.currentTime, paused: player.paused });
 });
 
-// --- Eventos de Transmissão de Tela ---
+// --- Socket: WebRTC & Screen Share ---
+socket.on('peer_disconnected', ({ sid }) => {
+    closePeerConnection(sid);
+    closeScreenShareConnection(sid);
+});
 
 socket.on('initiate_screen_share_to_peer', async ({ target_sid }) => {
-    if (isHost && screenStream) {
-        console.log(`Servidor pediu para iniciar transmissão para ${target_sid}`);
-        await createScreenShareConnection(target_sid, screenStream);
+    if (isHostRef.value && getScreenStream()) {
+        await createScreenShareConnection(target_sid, getScreenStream(), socket);
     }
 });
 
 socket.on('screen_share_stopped', () => {
-    console.log("Servidor informou o fim da transmissão de tela.");
-
-    // Clientes limpam suas conexões e player
-    if (!isHost) {
+    if (!isHostRef.value) {
         if (player.media.srcObject) {
             player.media.srcObject.getTracks().forEach(track => track.stop());
             player.media.srcObject = null;
@@ -728,308 +115,15 @@ socket.on('screen_share_stopped', () => {
         player.pause();
         showNotification("A transmissão de tela terminou.", "info");
     }
-
-    // Todos os clientes (não-hosts) devem limpar suas conexões de tela
     for (const sid in screenSharePeerConnections) {
         closeScreenShareConnection(sid);
     }
 });
 
-// --- Lógica de Sinalização WebRTC ---
 socket.on('webrtc_signal', async (payload) => {
-    const senderSid = payload.sender_sid;
-    if (!senderSid) return;
-
-    const purpose = payload.purpose || 'audio';
-
-    console.log(`Sinal WebRTC (${purpose}) recebido:`, payload.type, 'de', senderSid);
-
-    // --- Lógica para Transmissão de Tela ---
-    if (purpose === 'screen') {
-        let pc = screenSharePeerConnections[senderSid];
-
-        switch (payload.type) {
-            case 'offer': // Peer (não-host) recebe oferta do host
-                if (pc) closeScreenShareConnection(senderSid);
-
-                pc = new RTCPeerConnection(rtcConfig);
-                screenSharePeerConnections[senderSid] = pc;
-
-                // Enviar candidatos de volta (Importante para que o túnel bidirecional funcione bem em NATs)
-                pc.onicecandidate = (event) => {
-                    if (event.candidate) {
-                        const isIPv6 = event.candidate.candidate.split(' ')[4].includes(':');
-                        const emitPayload = () => socket.emit('webrtc_signal', {
-                            target_sid: senderSid,
-                            payload: { type: 'ice_candidate', candidate: event.candidate, purpose: 'screen' }
-                        });
-                        if (isIPv6) emitPayload();
-                        else setTimeout(emitPayload, 300);
-                    }
-                };
-
-                pc.ontrack = (event) => {
-                    console.log(`Stream de tela recebido de ${senderSid}`);
-                    if (player.media.srcObject !== event.streams[0]) {
-                        player.source = { type: 'video', sources: [] };
-                        player.media.srcObject = event.streams[0];
-                        player.muted = false;
-                        player.play().catch(e => console.warn("Autoplay da tela falhou", e));
-                    }
-                };
-
-                await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-                const answer = await pc.createAnswer();
-                answer.sdp = setIPv6First(answer.sdp); // Injeta prioridade no SDP
-                await pc.setLocalDescription(answer);
-                socket.emit('webrtc_signal', { target_sid: senderSid, payload: { type: 'answer', sdp: pc.localDescription, purpose: 'screen' } });
-                break;
-
-            case 'answer': // Host recebe resposta do peer
-                if (pc) await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-                break;
-
-            case 'ice_candidate':
-                if (pc && pc.remoteDescription) await pc.addIceCandidate(new RTCIceCandidate(payload.candidate)).catch(e => console.error('Erro ao adicionar candidato ICE (tela):', e));
-                break;
-        }
-        return; // Fim da lógica de tela
+    if (!payload.sender_sid) return;
+    if ((payload.purpose || 'audio') === 'screen') {
+        return handleScreenSignal(payload, socket, player);
     }
-
-    // --- Lógica Original para Áudio ---
-    switch (payload.type) {
-        case 'request':
-            showNotification(`${payload.from_name} quer estabelecer uma conexão de áudio.`, 'info', [
-                {
-                    text: 'Aceitar',
-                    className: 'primary',
-                    callback: async () => {
-                        socket.emit('webrtc_signal', {
-                            target_sid: senderSid,
-                            payload: { type: 'request_accepted', from_name: userName }
-                        });
-                        await createPeerConnection(senderSid, false); // Não é o iniciador
-                    }
-                },
-                {
-                    text: 'Recusar',
-                    callback: () => {
-                        socket.emit('webrtc_signal', {
-                            target_sid: senderSid,
-                            payload: { type: 'request_declined', from_name: userName }
-                        });
-                    }
-                }
-            ]);
-            break;
-
-        case 'request_accepted':
-            showNotification(`${payload.from_name} aceitou seu pedido. Iniciando conexão...`, 'success');
-            await createPeerConnection(senderSid, true); // É o iniciador
-            break;
-
-        case 'request_declined':
-            showNotification(`${payload.from_name} recusou seu pedido.`, 'warning');
-            break;
-
-        case 'offer':
-            if (peerConnections[senderSid]) {
-                await peerConnections[senderSid].setRemoteDescription(new RTCSessionDescription(payload.sdp));
-                const answer = await peerConnections[senderSid].createAnswer();
-                answer.sdp = setIPv6First(answer.sdp); // Injeta prioridade no SDP
-                await peerConnections[senderSid].setLocalDescription(answer);
-                socket.emit('webrtc_signal', {
-                    target_sid: senderSid,
-                    payload: { type: 'answer', sdp: peerConnections[senderSid].localDescription }
-                });
-            }
-            break;
-
-        case 'answer':
-            if (peerConnections[senderSid]) {
-                await peerConnections[senderSid].setRemoteDescription(new RTCSessionDescription(payload.sdp));
-            }
-            break;
-
-        case 'ice_candidate':
-            if (peerConnections[senderSid] && peerConnections[senderSid].remoteDescription) {
-                try {
-                    await peerConnections[senderSid].addIceCandidate(new RTCIceCandidate(payload.candidate));
-                } catch (e) {
-                    console.error('Erro ao adicionar candidato ICE:', e);
-                }
-            }
-            break;
-    }
-});
-
-// --- Lógica do Painel do Host e Transmissão de Tela ---
-statusIndicator.addEventListener('click', () => {
-    if (isHost) {
-        hostPanel.style.display = 'block';
-    }
-});
-
-closeHostPanelBtn.addEventListener('click', () => {
-    hostPanel.style.display = 'none';
-});
-
-screenShareBtn.addEventListener('click', async () => {
-    hostPanel.style.display = 'none';
-    if (screenStream) { // Se já estiver transmitindo, para.
-        stopScreenShare();
-        return;
-    }
-
-    try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-        screenStream = stream;
-
-        player.source = { type: 'video', sources: [] };
-        player.media.srcObject = screenStream;
-        player.muted = true; // Silenciar a reprodução local para evitar eco/feedback
-        player.play();
-
-        screenShareBtn.classList.add('sharing');
-        screenShareBtn.textContent = 'Parar Transmissão';
-
-        socket.emit('start_screen_share');
-
-        screenStream.getVideoTracks()[0].onended = () => stopScreenShare();
-
-    } catch (error) {
-        console.error("Erro ao iniciar a transmissão de tela:", error);
-        showNotification("Não foi possível iniciar a transmissão de tela. Permissão negada?", "warning");
-        if (screenStream) stopScreenShare();
-    }
-});
-
-// --- Listeners de Eventos do Player ---
-
-player.on('play', () => {
-    if (isHost && !isSyncing) {
-        console.log("Host deu Play");
-        if (!player.muted) dubPlayer.pause(); else dubPlayer.play();
-        socket.emit('host_sync', { type: 'play', time: player.currentTime });
-        return;
-    }
-
-    if (!isHost) {
-        if (syncInterval) clearInterval(syncInterval);
-        syncInterval = setInterval(() => {
-            // Só pede o sync se o vídeo estiver de fato tocando (não pausado)
-            if (!player.paused) {
-                console.log("Cliente pedindo sync de tempo...");
-                syncRequestTime = Date.now(); // Guarda o tempo do envio
-                socket.emit('request_sync');
-            }
-        }, 3000); // A cada 3 segundos
-    }
-});
-
-player.on('pause', () => {
-    if (isHost && !isSyncing) {
-        console.log("Host deu Pause");
-        dubPlayer.pause();
-        socket.emit('host_sync', { type: 'pause', time: player.currentTime });
-        return;
-    }
-
-    // Se não for o host, para o intervalo de sincronização ao pausar
-    if (!isHost) {
-        if (syncInterval) {
-            clearInterval(syncInterval);
-            syncInterval = null;
-        }
-    }
-});
-
-player.on('seeked', () => {
-    if (isHost && !isSyncing) {
-        console.log("Host buscou (Seek)");
-        dubPlayer.currentTime = player.currentTime + parseFloat(dubDelayInput.value);
-        socket.emit('host_sync', { type: 'seek', time: player.currentTime });
-    }
-});
-
-// --- Listeners de UI para WebRTC ---
-
-document.addEventListener('click', (e) => {
-    const micToggleBtn = e.target.closest('#mic-toggle-btn');
-    if (micToggleBtn && localStream) {
-        const isMuted = micToggleBtn.classList.contains('muted');
-        localStream.getAudioTracks().forEach(track => {
-            track.enabled = isMuted; // Se estava mutado, habilita.
-        });
-
-        micToggleBtn.classList.toggle('muted');
-        micToggleBtn.title = isMuted ? 'Mutar microfone' : 'Ativar microfone';
-    }
-});
-
-document.addEventListener('togglePeerMute', (e) => {
-    const sid = e.detail.sid;
-    const audioEl = document.getElementById(`peer-audio-${sid}`);
-    const userItem = document.querySelector(`.user-item[data-sid="${sid}"]`);
-    if (audioEl && userItem) {
-        audioEl.muted = !audioEl.muted;
-        userItem.classList.toggle('peer-muted', audioEl.muted);
-        const muteBtn = userItem.querySelector('.peer-mute-btn');
-        if (muteBtn) {
-            muteBtn.classList.toggle('muted', audioEl.muted);
-        }
-    }
-});
-
-document.addEventListener('requestPeerPing', async (e) => {
-    const sid = e.detail.sid;
-    const pc = peerConnections[sid];
-    if (pc) {
-        try {
-            const stats = await pc.getStats();
-            let ping = null;
-            let localCandidateId = null;
-            let remoteCandidateId = null;
-
-            stats.forEach(report => {
-                if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-                    ping = report.currentRoundTripTime ? report.currentRoundTripTime * 1000 : null;
-                    localCandidateId = report.localCandidateId;
-                    remoteCandidateId = report.remoteCandidateId;
-                }
-            });
-
-            let localType = 'Desconhecido';
-            let remoteType = 'Desconhecido';
-            let protocol = 'Desconhecido';
-            let localIpVersion = 'Unknown';
-            let remoteIpVersion = 'Unknown';
-
-            if (localCandidateId && remoteCandidateId) {
-                const localCandidate = stats.get(localCandidateId);
-                const remoteCandidate = stats.get(remoteCandidateId);
-
-                if (localCandidate) {
-                    localType = localCandidate.candidateType;
-                    protocol = localCandidate.protocol;
-                    const ip = localCandidate.address || localCandidate.ip || '';
-                    if (ip) localIpVersion = ip.includes(':') ? 'IPv6' : 'IPv4';
-                }
-                if (remoteCandidate) {
-                    remoteType = remoteCandidate.candidateType;
-                    const ip = remoteCandidate.address || remoteCandidate.ip || '';
-                    if (ip) remoteIpVersion = ip.includes(':') ? 'IPv6' : 'IPv4';
-                }
-            }
-
-            document.dispatchEvent(new CustomEvent('receivePeerPing', {
-                detail: {
-                    sid,
-                    stats: { ping, localType, remoteType, protocol, localIpVersion, remoteIpVersion }
-                }
-            }));
-        } catch (err) {
-            document.dispatchEvent(new CustomEvent('receivePeerPing', { detail: { sid, stats: null } }));
-        }
-    }
+    return handleAudioSignal(payload, socket, userName);
 });
