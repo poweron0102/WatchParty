@@ -3,6 +3,7 @@ uvicorn[standard]
 python-socketio
 python-multipart
 requests
+httpx
 aiofiles
 cinemagoer
 beautifulsoup4

@@ -101,15 +101,18 @@ export async function initializeChat(socket, currentUserName, showNotification, 
 
     // --- Lógica da Sidebar ---
     function toggleSidebar() {
+     const isMobile = window.matchMedia('(max-width: 900px)').matches;
      sidebar.classList.toggle('collapsed');
      if (sidebar.classList.contains('collapsed')) {
          toggleBtn.innerHTML = '<';
          toggleBtn.title = 'Expandir chat';
-         chatContainer.style.width = '0';
+         chatContainer.style.width = isMobile ? '100%' : '0';
+         chatContainer.style.flexBasis = isMobile ? '48px' : '';
      } else {
          toggleBtn.innerHTML = '>';
          toggleBtn.title = 'Recolher chat';
-         chatContainer.style.width = 'auto';
+         chatContainer.style.width = isMobile ? '100%' : 'auto';
+         chatContainer.style.flexBasis = '';
      }
     }
     toggleBtn.addEventListener('click', toggleSidebar);

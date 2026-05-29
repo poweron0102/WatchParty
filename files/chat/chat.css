@@ -3,6 +3,8 @@
 #chat-container {
     display: flex;
     position: relative;
+    min-width: 0;
+    min-height: 0;
     transition: flex 0.3s ease-in-out;
 }
 
@@ -10,6 +12,7 @@
     flex: 1;
     min-width: 300px;
     max-width: 350px;
+    min-height: 0;
     border-left: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
@@ -231,4 +234,94 @@
     font-size: 1.5em;
     cursor: pointer;
     line-height: 1;
+}
+
+@media (max-width: 900px) {
+    #chat-container {
+        flex: 0 0 min(42vh, 360px);
+        flex-basis: min(42dvh, 360px);
+        width: 100%;
+        min-height: 48px;
+    }
+
+    #sidebar {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+        border-left: none;
+        border-top: 1px solid var(--border-color);
+    }
+
+    #sidebar.collapsed {
+        min-width: 0;
+        max-width: none;
+    }
+
+    #sidebar-toggle {
+        top: -39px;
+        right: 12px;
+        left: auto;
+        transform: none;
+        width: 44px;
+        height: 38px;
+        border: 1px solid var(--border-color);
+        border-bottom: none;
+        border-radius: 8px 8px 0 0;
+    }
+
+    #user-list {
+        padding: 10px;
+        gap: 8px;
+    }
+
+    .user-item {
+        width: 92px;
+        height: 98px;
+        padding: 0.4rem;
+    }
+
+    .user-item .user-pfp {
+        width: 52px;
+        height: 52px;
+    }
+
+    #chat-box {
+        padding: 10px 12px;
+    }
+
+    #chat-input-area {
+        gap: 8px;
+        padding: 8px;
+    }
+
+    #chat-input {
+        min-width: 0;
+        margin-right: 0;
+    }
+
+    #mic-toggle-btn,
+    #send-btn {
+        min-width: 42px;
+        min-height: 42px;
+        padding: 0 10px;
+    }
+
+    #user-context-menu {
+        max-width: calc(100vw - 24px);
+    }
+}
+
+@media (max-width: 420px) {
+    #chat-container {
+        flex-basis: 46dvh;
+    }
+
+    .user-item {
+        width: 82px;
+        height: 90px;
+    }
+
+    .user-item .user-name {
+        font-size: 0.78rem;
+    }
 }

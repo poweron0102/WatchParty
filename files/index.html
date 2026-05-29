@@ -4,22 +4,58 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Entrar na Sala</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <link rel="icon" type="image/png" href="system_avatar.png">
 </head>
 <body>
-    <form id="login-form">
-        <h2>Entrar na Watch Party</h2>
-        <div>
-            <label for="name">Nome de Exibição:</label>
-            <input type="text" id="name" required>
-        </div>
-        <div>
-            <label for="pfp">Foto de Perfil (Opcional):</label>
-            <input type="file" id="pfp" accept="image/*">
-        </div>
-        <button type="submit">Entrar</button>
-    </form>
+    <main class="login-shell">
+        <section class="brand-panel" aria-label="Watch Party">
+            <img src="system_avatar.png" alt="" class="brand-avatar">
+            <div>
+                <p class="eyebrow">Watch Party</p>
+                <h1>Entre na sala com sua cara.</h1>
+                <p class="intro">Escolha um nome, ajuste sua foto em formato quadrado e comece a assistir junto.</p>
+            </div>
+        </section>
+
+        <form id="login-form" class="login-card">
+            <div class="form-heading">
+                <h2>Entrar</h2>
+                <p>Seu perfil aparece no chat e na lista de participantes.</p>
+            </div>
+
+            <label class="field">
+                <span>Nome de exibicao</span>
+                <input type="text" id="name" name="name" autocomplete="nickname" maxlength="32" required>
+            </label>
+
+            <div class="field">
+                <span>Foto de perfil</span>
+                <div class="avatar-tools">
+                    <label for="pfp" class="file-button">Escolher imagem</label>
+                    <button type="button" id="remove-photo" class="ghost-button" hidden>Remover</button>
+                </div>
+                <input type="file" id="pfp" accept="image/*">
+            </div>
+
+            <div id="crop-panel" class="crop-panel" hidden>
+                <div id="crop-frame" class="crop-frame" aria-label="Area de corte quadrada">
+                    <img id="pfp-preview" alt="Previa da foto selecionada">
+                </div>
+                <label class="zoom-control">
+                    <span>Zoom</span>
+                    <input type="range" id="zoom" min="1" max="3" step="0.01" value="1">
+                </label>
+            </div>
+
+            <canvas id="avatar-canvas" width="512" height="512" hidden></canvas>
+
+            <button type="submit" class="submit-button">Entrar na sala</button>
+        </form>
+    </main>
 
     <script src="script.js"></script>
 </body>
