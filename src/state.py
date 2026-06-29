@@ -4,5 +4,7 @@ server_state = {
     "is_paused": True,
     "current_time": 0,
     "host_sid": None,
-    "users": {}
+    "users": {},
+    "is_screen_sharing": False,
+    "screen_share_session_id": None
 }

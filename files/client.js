@@ -1,12 +1,12 @@
 import { initializeChat } from './chat/chat.js';
 import { showNotification } from './modules/notifications.js';
-import { setSocketIdGetter, closePeerConnection, handleAudioSignal } from './modules/webrtc.js';
-import { screenSharePeerConnections, closeScreenShareConnection, createScreenShareConnection,
-         stopScreenShare, getScreenStream, handleScreenSignal } from './modules/screen-share.js';
-import { syncState, setupDubListeners, handleSyncState, handleSyncEvent, handleForceSync } from './modules/video-sync.js';
+import { loadRtcConfig, setSocketIdGetter, closePeerConnection, handleAudioSignal } from './modules/webrtc.js';
+import { closeScreenShareConnection, createScreenShareConnection, getScreenShareSessionId,
+         isScreenShareVideo, setScreenShareSession, stopScreenShare, getScreenStream,
+         handleScreenSignal } from './modules/screen-share.js';
+import { setupDubListeners, handleSyncState, handleSyncEvent, handleForceSync } from './modules/video-sync.js';
 import { updateStatusIndicator, setupHostUI } from './modules/host-ui.js';
 
-// --- DOM & State ---
 const socket = io();
 const player = new Plyr('#player', { tooltips: { controls: true, seek: true } });
 const dubPlayer = document.getElementById('dub-player');
@@ -28,21 +28,17 @@ if (!userName) window.location.href = '/';
 
 socket.emit('join_room', { name: userName, pfp: userPfp });
 
-// Give webrtc.js access to the socket id for speech monitoring
 setSocketIdGetter(() => socket.id);
+loadRtcConfig();
 
-// --- Module Setup ---
 document.addEventListener('DOMContentLoaded', () => {
     showNotification(`Bem-vindo à party, <strong>${userName}</strong>!`, 'success');
 });
 
 initializeChat(socket, userName, showNotification, () => isHostRef.value);
-
 setupDubListeners(dubSelector, dubVolume, dubDelayInput, dubPlayer, player);
-
 setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIndicator, hostPanel, screenShareBtn, closeHostPanelBtn, isHostRef });
 
-// --- Socket: Host Status ---
 socket.on('set_host', () => {
     isHostRef.value = true;
     updateStatusIndicator(statusIndicator, true);
@@ -76,13 +72,29 @@ socket.on('update_users', (users) => {
     clientState.users = users;
 });
 
-// --- Socket: Video Sync ---
 socket.on('sync_state', (state) => {
+    if (isScreenShareVideo(state.video) && state.session_id) {
+        setScreenShareSession(state.session_id, 'receiving');
+    }
     handleSyncState(state, player, dubSelector, audioControlsContainer);
 });
 
 socket.on('sync_event', (data) => {
-    handleSyncEvent(data, player, dubPlayer, dubDelayInput, isHostRef, dubSelector, audioControlsContainer, getScreenStream, () => stopScreenShare(socket, player, screenShareBtn, isHostRef));
+    if (data.type === 'set_video' && isScreenShareVideo(data.video)) {
+        setScreenShareSession(data.session_id, 'receiving');
+    }
+
+    handleSyncEvent(
+        data,
+        player,
+        dubPlayer,
+        dubDelayInput,
+        isHostRef,
+        dubSelector,
+        audioControlsContainer,
+        getScreenStream,
+        (options = {}) => stopScreenShare(socket, player, screenShareBtn, isHostRef, options)
+    );
 });
 
 socket.on('force_sync', (data) => {
@@ -93,30 +105,27 @@ socket.on('get_host_time', (callback) => {
     if (isHostRef.value) callback({ time: player.currentTime, paused: player.paused });
 });
 
-// --- Socket: WebRTC & Screen Share ---
 socket.on('peer_disconnected', ({ sid }) => {
     closePeerConnection(sid);
     closeScreenShareConnection(sid);
 });
 
-socket.on('initiate_screen_share_to_peer', async ({ target_sid }) => {
-    if (isHostRef.value && getScreenStream()) {
-        await createScreenShareConnection(target_sid, getScreenStream(), socket);
+socket.on('initiate_screen_share_to_peer', async ({ target_sid, session_id }) => {
+    if (isHostRef.value && getScreenStream() && session_id) {
+        await createScreenShareConnection(target_sid, getScreenStream(), socket, session_id);
     }
 });
 
-socket.on('screen_share_stopped', () => {
+socket.on('screen_share_stopped', (payload = {}) => {
+    const stoppedSessionId = payload.session_id;
+    const activeSessionId = getScreenShareSessionId();
+
+    if (stoppedSessionId && activeSessionId && stoppedSessionId !== activeSessionId) return;
+
+    stopScreenShare(socket, player, screenShareBtn, isHostRef, { emit: false, sessionId: stoppedSessionId });
+
     if (!isHostRef.value) {
-        if (player.media.srcObject) {
-            player.media.srcObject.getTracks().forEach(track => track.stop());
-            player.media.srcObject = null;
-        }
-        player.source = { type: 'video', sources: [] };
-        player.pause();
-        showNotification("A transmissão de tela terminou.", "info");
-    }
-    for (const sid in screenSharePeerConnections) {
-        closeScreenShareConnection(sid);
+        showNotification('A transmissão de tela terminou.', 'info');
     }
 });
 

@@ -21,9 +21,14 @@ Aplicação em Python para assistir vídeos localmente com amigos.
         {
             "port": 5467,
             "video_dir": "/caminho/para/seus/videos",
-            "auto_scrape": false
+            "auto_scrape": false,
+            "ice_servers": [
+                { "urls": "stun:stun.l.google.com:19302" },
+                { "urls": "turn:turn.exemplo.com:3478", "username": "usuario", "credential": "senha" }
+            ]
         }
         ```
+        * O servidor TURN é opcional, mas ajuda a transmissão de tela a funcionar pela internet quando STUN sozinho não atravessa a rede/NAT.
 3.  **Iniciar o Servidor:**
     ```bash
     python src/main.py

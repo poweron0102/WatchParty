@@ -1,11 +1,13 @@
 import { isVideoFromYoutube } from './utils.js';
 import { showNotification } from './notifications.js';
+import { isScreenShareVideo } from './screen-share.js';
 
 // Shared mutable state — imported as a live reference by host-ui.js
 export const syncState = {
     isSyncing: false,
     syncInterval: null,
-    syncRequestTime: 0
+    syncRequestTime: 0,
+    currentVideo: null
 };
 
 export async function loadMediaTracks(videoPath) {
@@ -64,6 +66,15 @@ export function handleSyncState(state, player, dubSelector, audioControlsContain
     if (!state.video) return;
 
     syncState.isSyncing = true;
+    syncState.currentVideo = state.video;
+
+    if (isScreenShareVideo(state.video)) {
+        player.pause();
+        player.source = { type: 'video', sources: [] };
+        setupDubControls([], dubSelector, audioControlsContainer);
+        setTimeout(() => { syncState.isSyncing = false; }, 500);
+        return;
+    }
 
     if (state.video.startsWith('http')) {
         player.source = {
@@ -95,20 +106,32 @@ export function handleSyncState(state, player, dubSelector, audioControlsContain
 
 export function handleSyncEvent(data, player, dubPlayer, dubDelayInput, isHostRef, dubSelector, audioControlsContainer, getScreenStream, stopScreenShare) {
     if (isHostRef.value && ['play', 'pause', 'seek'].includes(data.type)) return;
+    if (isScreenShareVideo(syncState.currentVideo) && ['play', 'pause', 'seek'].includes(data.type)) return;
 
     syncState.isSyncing = true;
 
     try {
         switch (data.type) {
             case 'set_video':
-                if (isHostRef.value && getScreenStream()) stopScreenShare();
+                syncState.currentVideo = data.video;
+
+                if (isHostRef.value && getScreenStream()) {
+                    stopScreenShare({ emit: false, sessionId: data.session_id });
+                }
 
                 if (player.media.srcObject) {
                     player.media.srcObject.getTracks().forEach(track => track.stop());
                     player.media.srcObject = null;
                 }
 
-                if (data.video === 'screen-share') {
+                if (isScreenShareVideo(data.video)) {
+                    if (syncState.syncInterval) {
+                        clearInterval(syncState.syncInterval);
+                        syncState.syncInterval = null;
+                    }
+                    dubPlayer.pause();
+                    dubPlayer.src = '';
+                    setupDubControls([], dubSelector, audioControlsContainer);
                     showNotification("O host iniciou uma transmissão de tela.", "info");
                     player.pause();
                     player.source = { type: 'video', sources: [] };
@@ -160,7 +183,7 @@ export function handleSyncEvent(data, player, dubPlayer, dubDelayInput, isHostRe
 }
 
 export function handleForceSync(data, player, isHostRef, statusIndicator) {
-    if (isHostRef.value || syncState.isSyncing) return;
+    if (isHostRef.value || syncState.isSyncing || player.media.srcObject || isScreenShareVideo(syncState.currentVideo)) return;
 
     const ping = Date.now() - syncState.syncRequestTime;
     const correctedTime = data.time + (ping / 2 / 1000);

@@ -6,11 +6,11 @@ import cv2
 import random
 import requests
 from bs4 import BeautifulSoup
-from imdb import Cinemagoer
+#from imdb import Cinemagoer
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, JSONResponse
 from starlette.requests import Request
-from config import FILES_DIR, CACHE_DIR, VIDEO_DIR, PORT
+from config import FILES_DIR, CACHE_DIR, VIDEO_DIR, PORT, ICE_SERVERS
 from server_setup import app
 from utils import get_public_ip
 
@@ -30,7 +30,8 @@ def _fetch_imdb_poster_url(title: str) -> str | None:
     e retorna a URL do pôster em alta resolução.
     """
     print(f"Buscando imagem no IMDb para '{title}'...")
-    ia = Cinemagoer()
+    #ia = Cinemagoer()
+    ia = None
     movies = ia.search_movie(title)
 
     if not movies:
@@ -109,6 +110,11 @@ async def stream_video(video_path: str, request: Request):
 
 
 # 4. Endpoints de API
+
+@app.get("/api/rtc_config")
+async def get_rtc_config():
+    return {"iceServers": ICE_SERVERS}
+
 
 @app.post("/api/upload_image")
 async def upload_image(file: fastapi.UploadFile):

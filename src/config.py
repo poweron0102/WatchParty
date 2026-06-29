@@ -14,9 +14,29 @@ SAVE_FILE = "save.json"
 CLOUDFLARE_FILE = "cloudflare.json"
 CACHE_DIR = "cache"
 FILES_DIR = "files"
+DEFAULT_ICE_SERVERS = [{"urls": "stun:stun.l.google.com:19302"}]
+
+
+def _normalize_ice_servers(value):
+    if not isinstance(value, list):
+        return DEFAULT_ICE_SERVERS
+
+    normalized = []
+    for server in value:
+        if isinstance(server, str) and server:
+            normalized.append({"urls": server})
+        elif isinstance(server, dict) and server.get("urls"):
+            normalized.append(server)
+
+    return normalized or DEFAULT_ICE_SERVERS
 
 # --- Configurações Gerais (save.json) ---
-config = {"port": 8000, "video_dir": "videos"}
+config = {
+    "port": 8000,
+    "video_dir": "videos",
+    "use_cloudflare": False,
+    "ice_servers": DEFAULT_ICE_SERVERS
+}
 
 if os.path.exists(SAVE_FILE):
     try:
@@ -29,12 +49,14 @@ else:
         f.write(json.dumps({
             "port": 8000,
             "video_dir": "videos",
-            "use_cloudflare": False
+            "use_cloudflare": False,
+            "ice_servers": DEFAULT_ICE_SERVERS
         }, indent=4))
 
 PORT = config["port"]
 VIDEO_DIR = config["video_dir"]
-USE_CLOUDFLARE = config["use_cloudflare"]
+USE_CLOUDFLARE = config.get("use_cloudflare", False)
+ICE_SERVERS = _normalize_ice_servers(config.get("ice_servers"))
 
 if not os.path.isdir(VIDEO_DIR):
     print(f"Aviso: Diretório de vídeos '{VIDEO_DIR}' não encontrado. O servidor pode falhar ao iniciar.")

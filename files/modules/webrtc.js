@@ -8,6 +8,7 @@ export const rtcConfig = {
 
 export const peerConnections = {};
 let localStream = null;
+let rtcConfigReady = null;
 
 const peerAudioContainer = document.createElement('div');
 peerAudioContainer.id = 'peer-audio-container';
@@ -25,6 +26,28 @@ export function setSocketIdGetter(fn) {
 
 export function getLocalStream() {
     return localStream;
+}
+
+export async function loadRtcConfig() {
+    if (rtcConfigReady) return rtcConfigReady;
+
+    rtcConfigReady = fetch('/api/rtc_config')
+        .then(response => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json();
+        })
+        .then(data => {
+            if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+                rtcConfig.iceServers = data.iceServers;
+            }
+            return rtcConfig;
+        })
+        .catch(error => {
+            console.warn('Nao foi possivel carregar a configuracao RTC. Usando STUN padrao.', error);
+            return rtcConfig;
+        });
+
+    return rtcConfigReady;
 }
 
 export async function getLocalMicStream() {
@@ -53,6 +76,8 @@ export async function getLocalMicStream() {
 export async function createPeerConnection(targetSid, isInitiator, socket) {
     const stream = await getLocalMicStream();
     if (!stream) return;
+
+    await loadRtcConfig();
 
     const pc = new RTCPeerConnection(rtcConfig);
     peerConnections[targetSid] = pc;

@@ -1,5 +1,4 @@
-import { showNotification } from './notifications.js';
-import { stopScreenShare, getScreenStream, setScreenStream, createScreenShareConnection } from './screen-share.js';
+import { isScreenShareActive, startScreenShare, stopScreenShare } from './screen-share.js';
 import { peerConnections, getLocalStream } from './webrtc.js';
 import { syncState } from './video-sync.js';
 
@@ -12,7 +11,6 @@ export function updateStatusIndicator(statusIndicator, isHost) {
 }
 
 export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIndicator, hostPanel, screenShareBtn, closeHostPanelBtn, isHostRef }) {
-    // Host panel toggle
     statusIndicator.addEventListener('click', () => {
         if (isHostRef.value) hostPanel.style.display = 'block';
     });
@@ -21,44 +19,27 @@ export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIn
         hostPanel.style.display = 'none';
     });
 
-    // Screen share button
     screenShareBtn.addEventListener('click', async () => {
         hostPanel.style.display = 'none';
-        if (getScreenStream()) {
+
+        if (isScreenShareActive()) {
             stopScreenShare(socket, player, screenShareBtn, isHostRef);
             return;
         }
 
-        try {
-            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-
-            player.source = { type: 'video', sources: [] };
-            setScreenStream(stream);
-
-            player.media.srcObject = stream;
-            player.muted = true;
-            player.play();
-
-            screenShareBtn.classList.add('sharing');
-            screenShareBtn.textContent = 'Parar Transmissão';
-
-            socket.emit('start_screen_share');
-
-            stream.getVideoTracks()[0].onended = () => stopScreenShare(socket, player, screenShareBtn, isHostRef);
-
-        } catch (error) {
-            console.error("Erro ao iniciar a transmissão de tela:", error);
-            showNotification("Não foi possível iniciar a transmissão de tela. Permissão negada?", "warning");
-        }
+        await startScreenShare(socket, player, screenShareBtn);
     });
 
-    // Player event listeners
     player.on('play', () => {
+        if (isScreenShareActive()) return;
+
         if (isHostRef.value && !syncState.isSyncing) {
-            if (!player.muted) dubPlayer.pause(); else dubPlayer.play();
+            if (!player.muted) dubPlayer.pause();
+            else dubPlayer.play();
             socket.emit('host_sync', { type: 'play', time: player.currentTime });
             return;
         }
+
         if (!isHostRef.value) {
             if (syncState.syncInterval) clearInterval(syncState.syncInterval);
             syncState.syncInterval = setInterval(() => {
@@ -71,27 +52,29 @@ export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIn
     });
 
     player.on('pause', () => {
+        if (isScreenShareActive()) return;
+
         if (isHostRef.value && !syncState.isSyncing) {
             dubPlayer.pause();
             socket.emit('host_sync', { type: 'pause', time: player.currentTime });
             return;
         }
-        if (!isHostRef.value) {
-            if (syncState.syncInterval) {
-                clearInterval(syncState.syncInterval);
-                syncState.syncInterval = null;
-            }
+
+        if (!isHostRef.value && syncState.syncInterval) {
+            clearInterval(syncState.syncInterval);
+            syncState.syncInterval = null;
         }
     });
 
     player.on('seeked', () => {
+        if (isScreenShareActive()) return;
+
         if (isHostRef.value && !syncState.isSyncing) {
             dubPlayer.currentTime = player.currentTime + parseFloat(dubDelayInput.value);
             socket.emit('host_sync', { type: 'seek', time: player.currentTime });
         }
     });
 
-    // Mic toggle (button is injected by chat module into the DOM)
     document.addEventListener('click', (e) => {
         const micToggleBtn = e.target.closest('#mic-toggle-btn');
         const localStream = getLocalStream();
@@ -103,7 +86,6 @@ export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIn
         }
     });
 
-    // Peer mute toggle
     document.addEventListener('togglePeerMute', (e) => {
         const sid = e.detail.sid;
         const audioEl = document.getElementById(`peer-audio-${sid}`);
@@ -116,7 +98,6 @@ export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIn
         }
     });
 
-    // Peer ping stats
     document.addEventListener('requestPeerPing', async (e) => {
         const sid = e.detail.sid;
         const pc = peerConnections[sid];
@@ -136,9 +117,11 @@ export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIn
                 }
             });
 
-            let localType = 'Desconhecido', remoteType = 'Desconhecido';
+            let localType = 'Desconhecido';
+            let remoteType = 'Desconhecido';
             let protocol = 'Desconhecido';
-            let localIpVersion = 'Unknown', remoteIpVersion = 'Unknown';
+            let localIpVersion = 'Unknown';
+            let remoteIpVersion = 'Unknown';
 
             if (localCandidateId && remoteCandidateId) {
                 const localCandidate = stats.get(localCandidateId);
@@ -164,4 +147,3 @@ export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIn
         }
     });
 }
-
