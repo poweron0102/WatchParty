@@ -1,6 +1,6 @@
 import { initializeChat } from './chat/chat.js';
 import { showNotification } from './modules/notifications.js';
-import { loadRtcConfig, setSocketIdGetter, closePeerConnection, handleAudioSignal } from './modules/webrtc.js';
+import { setSocketIdGetter, closePeerConnection, handleAudioSignal } from './modules/webrtc.js';
 import { closeScreenShareConnection, createScreenShareConnection, getScreenShareSessionId,
          isScreenShareVideo, setScreenShareSession, stopScreenShare, getScreenStream,
          handleScreenSignal } from './modules/screen-share.js';
@@ -29,7 +29,6 @@ if (!userName) window.location.href = '/';
 socket.emit('join_room', { name: userName, pfp: userPfp });
 
 setSocketIdGetter(() => socket.id);
-loadRtcConfig();
 
 document.addEventListener('DOMContentLoaded', () => {
     showNotification(`Bem-vindo à party, <strong>${userName}</strong>!`, 'success');

@@ -5,14 +5,26 @@ import hashlib
 import cv2
 import random
 import requests
+import secrets
 from bs4 import BeautifulSoup
 #from imdb import Cinemagoer
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, JSONResponse
 from starlette.requests import Request
-from config import FILES_DIR, CACHE_DIR, VIDEO_DIR, PORT, ICE_SERVERS
+from pydantic import BaseModel
+from typing import Literal
+from config import (
+    FILES_DIR, CACHE_DIR, VIDEO_DIR, PORT, ICE_SERVERS,
+    TURN_HOST, TURN_SECRET, TURN_PORT, TURN_CREDENTIAL_TTL, TURN_CONFIGURED
+)
+from rtc_config import build_rtc_config, managed_turn_server
 from server_setup import app
+from state import server_state
 from utils import get_public_ip
+
+
+class RtcModeUpdate(BaseModel):
+    mode: Literal["off", "auto", "relay"]
 
 def _get_high_res_imdb_url(url: str) -> str:
     """
@@ -113,7 +125,32 @@ async def stream_video(video_path: str, request: Request):
 
 @app.get("/api/rtc_config")
 async def get_rtc_config():
-    return {"iceServers": ICE_SERVERS}
+    mode = server_state["rtc_mode"]
+    turn_server = managed_turn_server(
+        TURN_HOST,
+        TURN_PORT,
+        TURN_SECRET,
+        secrets.token_urlsafe(12),
+        TURN_CREDENTIAL_TTL,
+    )
+    return build_rtc_config(ICE_SERVERS, mode, turn_server)
+
+
+@app.get("/api/rtc_mode")
+async def get_rtc_mode():
+    return {"mode": server_state["rtc_mode"], "turnConfigured": TURN_CONFIGURED}
+
+
+@app.put("/api/rtc_mode")
+async def update_rtc_mode(update: RtcModeUpdate):
+    if update.mode != "off" and not TURN_CONFIGURED:
+        raise fastapi.HTTPException(
+            status_code=409,
+            detail="O servidor TURN nao esta configurado.",
+        )
+
+    server_state["rtc_mode"] = update.mode
+    return {"mode": update.mode, "turnConfigured": TURN_CONFIGURED}
 
 
 @app.post("/api/upload_image")

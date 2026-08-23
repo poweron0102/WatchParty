@@ -2,13 +2,8 @@ import { showNotification } from './notifications.js';
 import { setIPv6First } from './utils.js';
 import { monitorSpeech } from './audio-monitor.js';
 
-export const rtcConfig = {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-};
-
 export const peerConnections = {};
 let localStream = null;
-let rtcConfigReady = null;
 
 const peerAudioContainer = document.createElement('div');
 peerAudioContainer.id = 'peer-audio-container';
@@ -29,25 +24,24 @@ export function getLocalStream() {
 }
 
 export async function loadRtcConfig() {
-    if (rtcConfigReady) return rtcConfigReady;
+    try {
+        const response = await fetch('/api/rtc_config', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-    rtcConfigReady = fetch('/api/rtc_config')
-        .then(response => {
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            return response.json();
-        })
-        .then(data => {
-            if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
-                rtcConfig.iceServers = data.iceServers;
-            }
-            return rtcConfig;
-        })
-        .catch(error => {
-            console.warn('Nao foi possivel carregar a configuracao RTC. Usando STUN padrao.', error);
-            return rtcConfig;
-        });
+        const data = await response.json();
+        if (!Array.isArray(data.iceServers) || !['all', 'relay'].includes(data.iceTransportPolicy)) {
+            throw new Error('Resposta RTC invalida.');
+        }
 
-    return rtcConfigReady;
+        return {
+            iceServers: data.iceServers,
+            iceTransportPolicy: data.iceTransportPolicy
+        };
+    } catch (error) {
+        console.error('Nao foi possivel carregar a configuracao RTC.', error);
+        showNotification('Nao foi possivel carregar a configuracao WebRTC. A nova conexao foi cancelada.', 'warning');
+        throw error;
+    }
 }
 
 export async function getLocalMicStream() {
@@ -74,10 +68,15 @@ export async function getLocalMicStream() {
 }
 
 export async function createPeerConnection(targetSid, isInitiator, socket) {
+    let rtcConfig;
+    try {
+        rtcConfig = await loadRtcConfig();
+    } catch (_error) {
+        return;
+    }
+
     const stream = await getLocalMicStream();
     if (!stream) return;
-
-    await loadRtcConfig();
 
     const pc = new RTCPeerConnection(rtcConfig);
     peerConnections[targetSid] = pc;

@@ -3,6 +3,8 @@
 import os
 import json
 
+from rtc_config import DEFAULT_ICE_SERVERS, normalize_ice_servers, split_ice_servers
+
 # --- Configuração Inicial ---
 
 # Garante que os diretórios existam
@@ -14,21 +16,6 @@ SAVE_FILE = "save.json"
 CLOUDFLARE_FILE = "cloudflare.json"
 CACHE_DIR = "cache"
 FILES_DIR = "files"
-DEFAULT_ICE_SERVERS = [{"urls": "stun:stun.l.google.com:19302"}]
-
-
-def _normalize_ice_servers(value):
-    if not isinstance(value, list):
-        return DEFAULT_ICE_SERVERS
-
-    normalized = []
-    for server in value:
-        if isinstance(server, str) and server:
-            normalized.append({"urls": server})
-        elif isinstance(server, dict) and server.get("urls"):
-            normalized.append(server)
-
-    return normalized or DEFAULT_ICE_SERVERS
 
 # --- Configurações Gerais (save.json) ---
 config = {
@@ -53,10 +40,19 @@ else:
             "ice_servers": DEFAULT_ICE_SERVERS
         }, indent=4))
 
-PORT = config["port"]
-VIDEO_DIR = config["video_dir"]
+PORT = int(os.getenv("WATCHPARTY_PORT", config["port"]))
+BIND_HOST = os.getenv("WATCHPARTY_BIND_HOST", "::").strip() or "::"
+VIDEO_DIR = os.getenv("WATCHPARTY_VIDEO_DIR", config["video_dir"])
 USE_CLOUDFLARE = config.get("use_cloudflare", False)
-ICE_SERVERS = _normalize_ice_servers(config.get("ice_servers"))
+ICE_SERVERS = normalize_ice_servers(config.get("ice_servers"))
+
+TURN_HOST = os.getenv("TURN_HOST", "").strip()
+TURN_REALM = os.getenv("TURN_REALM", TURN_HOST or "watchparty").strip()
+TURN_SECRET = os.getenv("TURN_SECRET", "").strip()
+TURN_PORT = int(os.getenv("TURN_PORT", "3478"))
+TURN_CREDENTIAL_TTL = int(os.getenv("TURN_CREDENTIAL_TTL", "86400"))
+_, CONFIGURED_TURN_SERVERS = split_ice_servers(ICE_SERVERS)
+TURN_CONFIGURED = bool(CONFIGURED_TURN_SERVERS or (TURN_HOST and TURN_SECRET))
 
 if not os.path.isdir(VIDEO_DIR):
     print(f"Aviso: Diretório de vídeos '{VIDEO_DIR}' não encontrado. O servidor pode falhar ao iniciar.")

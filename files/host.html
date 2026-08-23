@@ -105,6 +105,8 @@
             <a href="/party" target="_blank" class="font-semibold brand hover:underline">Assista aqui</a>
         </header>
 
+        <div id="status-message" class="hidden mb-6 rounded-md px-4 py-3" role="status"></div>
+
         <main class="grid grid-cols-1 gap-6 lg:gap-8">
             <!-- Coluna da Esquerda: Widgets -->
             <div class="flex flex-col gap-6">
@@ -118,6 +120,20 @@
                             <span>Copiar</span>
                         </button>
                     </div>
+                </div>
+
+                <!-- Card: Configuração WebRTC -->
+                <div class="bg-card p-6 rounded-lg shadow-lg">
+                    <h2 class="text-xl font-semibold mb-2" style="color: var(--text-primary);">Conexão WebRTC</h2>
+                    <p class="text-sm mb-4" style="color: var(--text-secondary);">Escolha como novas conexões de tela e microfone usarão o servidor TURN.</p>
+                    <label for="rtc-mode-select" class="block text-sm font-medium mb-2">Modo de conexão</label>
+                    <select id="rtc-mode-select" class="w-full bg-input border border-input rounded-md px-3 py-2 focus:outline-none focus:ring-2 ring-brand">
+                        <option value="off">Sem TURN</option>
+                        <option value="auto">Automático (fallback)</option>
+                        <option value="relay">Forçar TURN</option>
+                    </select>
+                    <p id="rtc-mode-description" class="text-sm mt-3" style="color: var(--text-secondary);"></p>
+                    <p id="rtc-mode-status" class="text-sm mt-2" role="status" aria-live="polite"></p>
                 </div>
 
                 <!-- Card: Definir por URL -->

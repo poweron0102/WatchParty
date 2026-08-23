@@ -7,8 +7,8 @@ import socketio
 
 @asynccontextmanager
 async def lifespan(_):
-    from src.config import USE_CLOUDFLARE
-    from src.dns_manager import start_dns_updater
+    from config import USE_CLOUDFLARE
+    from dns_manager import start_dns_updater
 
     if USE_CLOUDFLARE:
         asyncio.create_task(start_dns_updater())

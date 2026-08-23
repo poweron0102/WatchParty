@@ -48,3 +48,15 @@ Aplicação em Python para assistir vídeos localmente com amigos.
 2.  Abra o link no seu navegador.
 3.  Defina seu nome de usuário.
 4.  Aguarde o host iniciar o vídeo.
+
+## Docker e servidor TURN
+
+1. Copie `.env.example` para `.env` e configure `WATCHPARTY_VIDEO_DIR`, `TURN_HOST` e um `TURN_SECRET` aleatório longo.
+2. Inicie a aplicação e o Coturn:
+   ```bash
+   docker compose up -d --build
+   ```
+3. Encaminhe no roteador e permita no firewall as portas `3478` UDP/TCP e `49160-49200` UDP, ou os valores definidos no `.env`.
+4. Abra `http://localhost:5467/host` e escolha **Sem TURN**, **Automático** ou **Forçar TURN**.
+
+O modo selecionado vale para novas conexões de tela e microfone e volta para **Automático** quando o servidor reinicia. Em conexões residenciais com CGNAT, o encaminhamento de portas não funciona; nesse caso, hospede o Coturn em uma VPS ou solicite um IP público. Se `TURN_HOST` usar um registro da Cloudflare, mantenha esse registro como DNS direto, sem proxy.

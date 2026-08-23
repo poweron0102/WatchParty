@@ -1,4 +1,4 @@
-import { loadRtcConfig, rtcConfig } from './webrtc.js';
+import { loadRtcConfig } from './webrtc.js';
 import { setIPv6First } from './utils.js';
 import { showNotification } from './notifications.js';
 
@@ -202,7 +202,9 @@ export async function startScreenShare(socket, player, screenShareBtn) {
         console.error('Erro ao iniciar a transmissão de tela:', error);
         clearScreenShareState();
         setScreenShareMode('error', error);
-        showNotification('Não foi possível iniciar a transmissão de tela. Permissão negada?', 'warning');
+        if (error?.name === 'NotAllowedError') {
+            showNotification('Não foi possível iniciar a transmissão de tela. Permissão negada?', 'warning');
+        }
         return false;
     }
 }
@@ -265,7 +267,12 @@ function scheduleScreenShareRetry(targetSid, stream, socket, sessionId, retryCou
 export async function createScreenShareConnection(targetSid, stream, socket, sessionId, retryCount = 0) {
     if (!sessionId || !stream) return;
 
-    await loadRtcConfig();
+    let rtcConfig;
+    try {
+        rtcConfig = await loadRtcConfig();
+    } catch (_error) {
+        return;
+    }
     setScreenShareSession(sessionId, 'sharing');
 
     if (screenSharePeerConnections[targetSid]) closeScreenShareConnection(targetSid);
@@ -324,7 +331,12 @@ export async function handleScreenSignal(payload, socket, player) {
 
     switch (payload.type) {
         case 'offer':
-            await loadRtcConfig();
+            let rtcConfig;
+            try {
+                rtcConfig = await loadRtcConfig();
+            } catch (_error) {
+                return;
+            }
             if (pc) closeScreenShareConnection(senderSid);
 
             pc = new RTCPeerConnection(rtcConfig);

@@ -10,10 +10,97 @@ const videoUrlField = document.getElementById('video-url-field');
 const setUrlBtn = document.getElementById('set-url-btn');
 const breadcrumbsContainer = document.getElementById('breadcrumbs-container');
 const statusMessage = document.getElementById('status-message');
+const rtcModeSelect = document.getElementById('rtc-mode-select');
+const rtcModeDescription = document.getElementById('rtc-mode-description');
+const rtcModeStatus = document.getElementById('rtc-mode-status');
 
 // --- Estado ---
 let currentPath = '';
 let statusTimeout;
+let previousRtcMode = 'auto';
+
+const rtcModeDescriptions = {
+    off: 'Usa somente STUN. O navegador tenta estabelecer uma conexão direta.',
+    auto: 'Tenta uma conexão direta e usa o TURN como fallback quando necessário.',
+    relay: 'Usa somente candidatos relay; todo o tráfego WebRTC passa pelo TURN.'
+};
+
+function showStatus(message, type = 'success') {
+    if (!statusMessage) return;
+    clearTimeout(statusTimeout);
+    statusMessage.textContent = message;
+    statusMessage.className = `mb-6 rounded-md px-4 py-3 ${type === 'error' ? 'bg-red-900/50 text-red-200' : 'bg-green-900/50 text-green-200'}`;
+    statusTimeout = setTimeout(() => statusMessage.classList.add('hidden'), 4000);
+}
+
+function updateRtcModeDescription(mode) {
+    rtcModeDescription.textContent = rtcModeDescriptions[mode] || '';
+}
+
+function setRtcModeLoading(loading) {
+    rtcModeSelect.disabled = loading;
+    rtcModeStatus.textContent = loading ? 'Salvando...' : '';
+    rtcModeStatus.style.color = 'var(--text-secondary)';
+}
+
+async function loadRtcMode() {
+    let loaded = false;
+    setRtcModeLoading(true);
+    try {
+        const response = await fetch('/api/rtc_mode', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+
+        previousRtcMode = data.mode;
+        loaded = true;
+        rtcModeSelect.value = data.mode;
+        updateRtcModeDescription(data.mode);
+
+        for (const option of rtcModeSelect.options) {
+            option.disabled = !data.turnConfigured && option.value !== 'off';
+        }
+
+        if (!data.turnConfigured) {
+            rtcModeStatus.textContent = 'TURN não configurado. Defina TURN_HOST e TURN_SECRET no servidor.';
+            rtcModeStatus.style.color = '#fbbf24';
+        }
+    } catch (_error) {
+        rtcModeSelect.disabled = true;
+        rtcModeStatus.textContent = 'Não foi possível carregar o modo WebRTC.';
+        rtcModeStatus.style.color = '#f87171';
+    } finally {
+        if (loaded) {
+            rtcModeSelect.disabled = false;
+        }
+    }
+}
+
+rtcModeSelect.addEventListener('change', async () => {
+    const requestedMode = rtcModeSelect.value;
+    updateRtcModeDescription(requestedMode);
+    setRtcModeLoading(true);
+
+    try {
+        const response = await fetch('/api/rtc_mode', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: requestedMode })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+
+        previousRtcMode = data.mode;
+        rtcModeStatus.textContent = 'Modo salvo. A alteração vale para novas conexões.';
+        rtcModeStatus.style.color = '#86efac';
+    } catch (error) {
+        rtcModeSelect.value = previousRtcMode;
+        updateRtcModeDescription(previousRtcMode);
+        rtcModeStatus.textContent = error.message || 'Não foi possível salvar o modo.';
+        rtcModeStatus.style.color = '#f87171';
+    } finally {
+        rtcModeSelect.disabled = false;
+    }
+});
 
 function max(a, b) {
     if (a > b) return a;
@@ -224,4 +311,5 @@ function setVideo(videoPath) {
 }
 
 // Iniciar a navegação na raiz
+loadRtcMode();
 navigate();
