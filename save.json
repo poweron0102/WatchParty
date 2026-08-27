@@ -1,5 +1,13 @@
 {
     "port": 5467,
-    "video_dir": "D:\\Series e Filmes",
-    "use_cloudflare": true
+    "use_cloudflare": true,
+    "sources": [
+        {
+            "id": "local",
+            "type": "directory",
+            "label": "Mídia local",
+            "enabled": true,
+            "options": { "path": "D:\\Series e Filmes" }
+        }
+    ]
 }

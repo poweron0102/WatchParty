@@ -24,7 +24,7 @@ function setScreenShareMode(mode, error = null) {
 }
 
 export function isScreenShareVideo(video) {
-    return video === SCREEN_SHARE_VIDEO_ID;
+    return typeof video === 'string' && video === SCREEN_SHARE_VIDEO_ID;
 }
 
 export function isScreenShareActive() {

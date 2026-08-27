@@ -1,5 +1,9 @@
 import uuid
+import html
+from urllib.parse import urlencode
 
+from config import MEDIA_SOURCES
+from media_sources import MediaSourceError
 from server_setup import sio
 from state import server_state
 
@@ -9,6 +13,12 @@ SCREEN_SHARE_VIDEO_ID = "screen-share"
 
 def _is_host(sid):
     return sid == server_state.get("host_sid")
+
+
+def _is_control_panel(sid):
+    environ = sio.get_environ(sid) or {}
+    referer = environ.get("HTTP_REFERER", "")
+    return referer.rstrip("/").endswith("/host")
 
 
 async def _stop_active_screen_share(reset_video=True):
@@ -145,13 +155,26 @@ async def handle_webrtc_signal(sid, data):
 
 
 @sio.on("host_set_video")
-async def set_video(sid, video_name):
-    print(f"Host ou painel de host definiu o video para: {video_name}")
+async def set_video(sid, selection):
+    if not (_is_host(sid) or _is_control_panel(sid)):
+        return
+    if not isinstance(selection, dict):
+        return
+    source_id, media_id = selection.get("source_id"), selection.get("media_id")
+    if not isinstance(source_id, str) or not isinstance(media_id, str):
+        return
+    try:
+        item = await MEDIA_SOURCES.get(source_id).get_item(media_id)
+    except MediaSourceError:
+        await sio.emit("media_selection_error", {"message": "Não foi possível selecionar esse item."}, to=sid)
+        return
+    selection = {"source_id": source_id, "media_id": media_id}
+    print(f"Seleção de mídia definida na origem {source_id}")
 
     if server_state.get("is_screen_sharing"):
         await _stop_active_screen_share(reset_video=False)
 
-    server_state["current_video"] = video_name
+    server_state["current_video"] = selection
     server_state["current_time"] = 0
     server_state["is_paused"] = True
     server_state["is_screen_sharing"] = False
@@ -159,30 +182,18 @@ async def set_video(sid, video_name):
 
     await sio.emit("sync_event", {
         "type": "set_video",
-        "video": video_name,
+        "video": selection,
         "session_id": None
     })
 
-    if video_name.startswith("http"):
-        await sio.emit("new_message", {
-            "sender": "System",
-            "pfp": "/system_avatar.png",
-            "text": f"Reproduzindo video de: {video_name}"
-        })
-        return
-
-    last_slash_index = max(video_name.rfind("/"), video_name.rfind("\\"))
-    dir_path = video_name[:last_slash_index] + "/" if last_slash_index != -1 else ""
-    base_name = video_name[last_slash_index + 1:video_name.rfind(".")] if last_slash_index != -1 else video_name[:video_name.rfind(".")]
-    video_preview_path = f"/videos/{dir_path}.previews/{base_name}_banner.png"
-
+    image = ""
+    if item.image:
+        image_url = "/media/resource?" + urlencode({"source_id": source_id, "resource_id": item.image.id})
+        image = f'<br><img src="{html.escape(image_url)}" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:1rem;">'
     await sio.emit("new_message", {
         "sender": "System",
         "pfp": "/system_avatar.png",
-        "text": f"""
-            Playing video: {base_name} <br>
-            <img src="{video_preview_path}" style="width:100%;height:100%;object-fit:cover;display:block; border-radius: 1rem;">
-        """
+        "text": f"Reproduzindo: {html.escape(item.title)}{image}"
     })
 
 
@@ -191,7 +202,7 @@ async def host_sync_event(sid, data):
     if not _is_host(sid):
         return
 
-    if server_state.get("is_screen_sharing") or server_state.get("current_video") == SCREEN_SHARE_VIDEO_ID:
+    if server_state.get("is_screen_sharing"):
         return
 
     if data["type"] == "play":
@@ -218,7 +229,7 @@ async def handle_start_screen_share(sid):
 
     server_state["is_screen_sharing"] = True
     server_state["screen_share_session_id"] = session_id
-    server_state["current_video"] = SCREEN_SHARE_VIDEO_ID
+    server_state["current_video"] = None
     server_state["current_time"] = 0
     server_state["is_paused"] = False
 
@@ -256,7 +267,7 @@ async def handle_client_sync_request(sid):
     if host_sid is None or server_state.get("current_video") is None:
         return
 
-    if server_state.get("is_screen_sharing") or server_state.get("current_video") == SCREEN_SHARE_VIDEO_ID:
+    if server_state.get("is_screen_sharing"):
         return
 
     try:
