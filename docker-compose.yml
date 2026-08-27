@@ -1,0 +1,49 @@
+services:
+  app:
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      WATCHPARTY_PORT: ${WATCHPARTY_PORT:-5467}
+      WATCHPARTY_BIND_HOST: 0.0.0.0
+      TURN_HOST: ${TURN_HOST:?Defina TURN_HOST no arquivo .env}
+      TURN_REALM: ${TURN_REALM:-watchparty}
+      TURN_SECRET: ${TURN_SECRET:?Defina TURN_SECRET no arquivo .env}
+      TURN_PORT: ${TURN_PORT:-3478}
+      TURN_CREDENTIAL_TTL: ${TURN_CREDENTIAL_TTL:-86400}
+    ports:
+      - "${WATCHPARTY_PORT:-5467}:${WATCHPARTY_PORT:-5467}"
+    volumes:
+      - type: bind
+        source: ${WATCHPARTY_MEDIA_DIR:-./videos}
+        target: /media
+        read_only: true
+      - type: bind
+        source: ./docker/save.json
+        target: /app/save.json
+        read_only: true
+      - watchparty_cache:/app/cache
+
+  turn:
+    image: coturn/coturn:4.17.2-r0
+    restart: unless-stopped
+    command:
+      - --log-file=stdout
+      - --fingerprint
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET:?Defina TURN_SECRET no arquivo .env}
+      - --realm=${TURN_REALM:-watchparty}
+      - --listening-port=${TURN_PORT:-3478}
+      - --min-port=${TURN_MIN_PORT:-49160}
+      - --max-port=${TURN_MAX_PORT:-49200}
+      - --no-multicast-peers
+      - --external-ip=$$(detect-external-ip)
+    ports:
+      - "${TURN_PORT:-3478}:${TURN_PORT:-3478}/udp"
+      - "${TURN_PORT:-3478}:${TURN_PORT:-3478}/tcp"
+      - "${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}:${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}/udp"
+    volumes:
+      - ./docker/turnserver.conf:/etc/coturn/turnserver.conf:ro
+
+volumes:
+  watchparty_cache:

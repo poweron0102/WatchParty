@@ -1,0 +1,7 @@
+{
+    "api_token": "seu-token-da-api",
+    "zone_id": "seu-zone-id",
+    "record_name": "watch-party.exemplo.com",
+    "proxied": false,
+    "check_interval": 360
+}

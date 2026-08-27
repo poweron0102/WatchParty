@@ -1,4 +1,46 @@
-/cache/
+# Local configuration and secrets
 .env
+.env.*
+!.env.example
+/cloudflare.json
+/save.json
+/save - Copia.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python environments and generated files
+.venv/
+venv/
+env/
 __pycache__/
 *.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Build and package output
+build/
+dist/
+*.egg-info/
+
+# Runtime output
+/cache/
+*.log
+
+# Editors and IDEs (keep these rules centralized for every Git client)
+.idea/
+.vscode/
+*.code-workspace
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini

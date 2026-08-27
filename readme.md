@@ -5,7 +5,7 @@ Aplicação Python para assistir a vídeos sincronizados com amigos. Os catálog
 ## Instalação local
 
 1. Instale as dependências com `pip install -r requirements.txt`.
-2. Configure uma ou mais origens em `save.json`:
+2. Copie `save.example.json` para `save.json` e configure uma ou mais origens:
 
 ```json
 {

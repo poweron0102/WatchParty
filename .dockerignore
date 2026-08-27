@@ -1,0 +1,15 @@
+.git
+.idea
+.venv
+.env
+__pycache__
+*.pyc
+*.log
+cache
+videos
+preview
+tests_img
+save.json
+save - Copia.json
+cloudflare.json
+test.py
