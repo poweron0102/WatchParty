@@ -34,8 +34,6 @@ export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIn
         if (isScreenShareActive()) return;
 
         if (isHostRef.value && !syncState.isSyncing) {
-            if (!player.muted) dubPlayer.pause();
-            else dubPlayer.play();
             socket.emit('host_sync', { type: 'play', time: player.currentTime });
             return;
         }
@@ -55,7 +53,6 @@ export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIn
         if (isScreenShareActive()) return;
 
         if (isHostRef.value && !syncState.isSyncing) {
-            dubPlayer.pause();
             socket.emit('host_sync', { type: 'pause', time: player.currentTime });
             return;
         }
@@ -70,7 +67,6 @@ export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIn
         if (isScreenShareActive()) return;
 
         if (isHostRef.value && !syncState.isSyncing) {
-            dubPlayer.currentTime = player.currentTime + parseFloat(dubDelayInput.value);
             socket.emit('host_sync', { type: 'seek', time: player.currentTime });
         }
     });

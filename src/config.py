@@ -7,7 +7,13 @@ from rtc_config import DEFAULT_ICE_SERVERS, normalize_ice_servers, split_ice_ser
 os.makedirs("files", exist_ok=True)
 os.makedirs("cache", exist_ok=True)
 SAVE_FILE, CLOUDFLARE_FILE, CACHE_DIR, FILES_DIR = "save.json", "cloudflare.json", "cache", "files"
-defaults = {"port": 8000, "use_cloudflare": False, "ice_servers": DEFAULT_ICE_SERVERS, "sources": []}
+DEFAULT_PLAYBACK = {
+    "buffer_ahead_seconds": 30, "buffer_behind_seconds": 30,
+    "segment_wait_timeout_seconds": 30, "soft_sync_drift_seconds": 0.25,
+    "hard_sync_drift_seconds": 2.0, "inactive_playback_grace_seconds": 0,
+}
+defaults = {"port": 8000, "use_cloudflare": False, "ice_servers": DEFAULT_ICE_SERVERS,
+            "playback": DEFAULT_PLAYBACK, "sources": []}
 config = dict(defaults)
 if os.path.exists(SAVE_FILE):
     try:
@@ -25,6 +31,16 @@ else:
 PORT = int(os.getenv("WATCHPARTY_PORT", config["port"]))
 BIND_HOST = os.getenv("WATCHPARTY_BIND_HOST", "::").strip() or "::"
 USE_CLOUDFLARE = bool(config.get("use_cloudflare", False))
+PLAYBACK_CONFIG = dict(DEFAULT_PLAYBACK)
+raw_playback = config.get("playback", {})
+if not isinstance(raw_playback, dict) or set(raw_playback) - set(DEFAULT_PLAYBACK):
+    raise RuntimeError("Configuração playback inválida")
+PLAYBACK_CONFIG.update(raw_playback)
+for key, value in PLAYBACK_CONFIG.items():
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0 or (key != "inactive_playback_grace_seconds" and value == 0):
+        raise RuntimeError(f"Configuração playback inválida em {key}")
+if PLAYBACK_CONFIG["inactive_playback_grace_seconds"] != 0:
+    raise RuntimeError("inactive_playback_grace_seconds deve ser zero neste ciclo")
 ICE_SERVERS = normalize_ice_servers(config.get("ice_servers"))
 try:
     MEDIA_SOURCES = build_source_registry(config.get("sources"))

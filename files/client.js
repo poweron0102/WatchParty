@@ -6,10 +6,11 @@ import { closeScreenShareConnection, createScreenShareConnection, getScreenShare
          handleScreenSignal } from './modules/screen-share.js';
 import { setupDubListeners, handleSyncState, handleSyncEvent, handleForceSync } from './modules/video-sync.js';
 import { updateStatusIndicator, setupHostUI } from './modules/host-ui.js';
+import { PlayerController } from './modules/player-controller.js';
 
 const socket = io();
-const player = new Plyr('#player', { tooltips: { controls: true, seek: true } });
-const dubPlayer = document.getElementById('dub-player');
+const player = new PlayerController(document.getElementById('player'));
+const dubPlayer = { pause(){}, play(){ return Promise.resolve(); }, currentTime: 0 };
 const statusIndicator = document.getElementById('status-indicator');
 const audioControlsContainer = document.getElementById('audio-controls-container');
 const dubSelector = document.getElementById('dub-selector');

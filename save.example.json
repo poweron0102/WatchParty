@@ -1,13 +1,26 @@
 {
     "port": 5467,
     "use_cloudflare": false,
+    "playback": {
+        "buffer_ahead_seconds": 30,
+        "buffer_behind_seconds": 30,
+        "segment_wait_timeout_seconds": 30,
+        "soft_sync_drift_seconds": 0.25,
+        "hard_sync_drift_seconds": 2.0,
+        "inactive_playback_grace_seconds": 0
+    },
     "sources": [
         {
             "id": "local",
             "type": "directory",
             "label": "Midia local",
             "enabled": true,
-            "options": { "path": "C:\\caminho\\para\\seus\\videos" }
+            "options": {
+                "path": "C:\\caminho\\para\\seus\\videos",
+                "ffmpeg_path": "ffmpeg.exe",
+                "transcode_profile": "chrome-h264-aac",
+                "hardware_acceleration": "auto"
+            }
         }
     ]
 }

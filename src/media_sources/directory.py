@@ -20,13 +20,22 @@ CONTENT_TYPES = {
 
 
 class DirectorySource:
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, ffmpeg_path="ffmpeg.exe", transcode_profile="chrome-h264-aac", hardware_acceleration="auto"):
         try:
             self._root = Path(root).expanduser().resolve(strict=True)
         except (OSError, RuntimeError) as exc:
             raise InvalidSourceConfiguration("diretório inexistente ou inacessível") from exc
         if not self._root.is_dir():
             raise InvalidSourceConfiguration("o caminho configurado não é um diretório")
+
+        from .directory_playback import DirectoryPlaybackAdapter
+        self._playback = DirectoryPlaybackAdapter(self._root, ffmpeg_path, transcode_profile, hardware_acceleration)
+
+    @property
+    def playback_available(self): return self._playback.available
+
+    async def inspect(self, media_id): return await self._playback.inspect(media_id)
+    async def materialize(self, media_id, demand): return await self._playback.materialize(media_id, demand)
 
     def _resolve(self, opaque_id: str | None, *, must_exist: bool = True) -> Path:
         if not opaque_id:
@@ -92,6 +101,23 @@ class DirectorySource:
                                              "video", self._image_for_video(resolved)))
         key = lambda item: item.title.casefold()
         return CatalogPage(tuple(sorted(collections, key=key) + sorted(playable, key=key)))
+
+    async def search(self, query: str, cursor: str | None = None) -> CatalogPage:
+        if cursor is not None:
+            raise CollectionNotFound("paginação não suportada")
+        needle = query.strip().casefold()
+        if not needle:
+            return CatalogPage(())
+        items = []
+        try:
+            paths = self._root.rglob("*")
+            for path in paths:
+                if any(part.startswith(".") for part in path.relative_to(self._root).parts): continue
+                if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS and needle in path.name.casefold():
+                    items.append(CatalogEntry(self._id(path), path.name, EntryType.PLAYABLE, "video", self._image_for_video(path)))
+        except OSError as exc:
+            raise SourceUnavailable("origem temporariamente indisponível") from exc
+        return CatalogPage(tuple(sorted(items, key=lambda item: item.title.casefold())))
 
     @staticmethod
     def _track_metadata(path: Path, stem: str, fallback: str) -> tuple[str, str | None]:

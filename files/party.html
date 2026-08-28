@@ -7,7 +7,7 @@
      <link rel="preconnect" href="https://fonts.googleapis.com">
      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
-     <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+     <link rel="stylesheet" href="vendor/shaka/controls.css" />
      <link rel="stylesheet" href="party.css">
      <link rel="stylesheet" href="chat/chat.css">
      <link rel="icon" type="image/png" href="system_avatar.png">
@@ -36,14 +36,13 @@
         </div>
          <div id="video-container">
              <video id="player" controls referrerpolicy="no-referrer"></video>
-             <audio id="dub-player" style="display: none;"></audio>
          </div>
      </div>
 
      <div id="chat-container"></div>
 
      <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-     <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
+     <script src="vendor/shaka/shaka-player.ui.js"></script>
      <script type="module" src="client.js"></script>
  </body>
  </html>

@@ -34,6 +34,10 @@ dist/
 # Runtime output
 /cache/
 *.log
+*.tgz
+/package/
+/bin/*.exe
+*.wvd
 
 # Editors and IDEs (keep these rules centralized for every Git client)
 .idea/

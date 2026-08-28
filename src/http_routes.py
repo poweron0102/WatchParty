@@ -10,7 +10,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, StreamingResponse
 from typing import Literal
 
-from config import (CACHE_DIR, FILES_DIR, ICE_SERVERS, MEDIA_SOURCES, PORT,
+from config import (CACHE_DIR, FILES_DIR, ICE_SERVERS, MEDIA_SOURCES, PLAYBACK_CONFIG, PORT,
                     TURN_CONFIGURED, TURN_CREDENTIAL_TTL, TURN_HOST, TURN_PORT, TURN_SECRET)
 from media_sources import (ByteRangeRequest, CollectionNotFound, InvalidByteRange,
                            MediaItemNotFound, ResourceNotFound, SourceNotFound,
@@ -19,6 +19,12 @@ from rtc_config import build_rtc_config, managed_turn_server
 from server_setup import app
 from state import server_state
 from utils import get_public_ip
+from playback import PlaybackModule, PlaybackSelection, ResourceRequest
+from playback.models import (InvalidPlaybackResource, MaterializationTimeout, PlaybackExpired,
+                             PlaybackNotFound, PlaybackPaused)
+
+PLAYBACK = PlaybackModule(MEDIA_SOURCES.playback_origins(), os.path.join(CACHE_DIR, "playback"),
+                          wait_timeout=PLAYBACK_CONFIG["segment_wait_timeout_seconds"])
 
 
 class RtcModeUpdate(BaseModel):
@@ -114,6 +120,52 @@ async def get_media(source_id: str, media_id: str):
         for track in data[group]:
             track["url"] = _resource_url(source_id, track["resource_id"])
     return data
+
+
+@app.get("/api/search")
+async def search_catalog(source_id: str, q: str, cursor: str | None = None):
+    try:
+        page = await MEDIA_SOURCES.get(source_id).search(q, cursor)
+    except Exception as exc:
+        raise _media_error(exc) from exc
+    items = []
+    for item in page.items:
+        data = asdict(item); data["image"] = _serialize_resource(source_id, item.image); items.append(data)
+    return {"items": items, "next_cursor": page.next_cursor}
+
+
+@app.post("/api/playback/select")
+async def select_playback(selection: dict):
+    try:
+        descriptor = await PLAYBACK.select(PlaybackSelection(selection["source_id"], selection["media_id"]))
+    except (KeyError, PlaybackNotFound):
+        raise fastapi.HTTPException(404, "Playback indisponível.")
+    except Exception as exc:
+        raise _media_error(exc) from exc
+    data = asdict(descriptor)
+    data["manifest"]["url"] = f"/playback/{descriptor.playback_id}/asset/manifest.mpd"
+    return data
+
+
+@app.put("/api/playback/{playback_id}/paused")
+async def pause_playback(playback_id: str, payload: dict):
+    try: await PLAYBACK.set_download_paused(playback_id, bool(payload.get("paused")))
+    except PlaybackExpired: raise fastapi.HTTPException(410, "Apresentação substituída.")
+    except PlaybackNotFound: raise fastapi.HTTPException(404, "Playback não encontrado.")
+    return {"paused": bool(payload.get("paused"))}
+
+
+@app.api_route("/playback/{playback_id}/asset/{resource_id}", methods=["GET", "HEAD"])
+async def playback_asset(request: Request, playback_id: str, resource_id: str):
+    try: opened = await PLAYBACK.open(playback_id, resource_id, ResourceRequest(request.method))
+    except PlaybackExpired: raise fastapi.HTTPException(410, "Apresentação substituída.")
+    except (PlaybackNotFound, InvalidPlaybackResource): raise fastapi.HTTPException(404, "Recurso não encontrado.")
+    except PlaybackPaused: raise fastapi.HTTPException(409, "Materialização pausada.", headers={"X-WatchParty-State": "download-paused"})
+    except MaterializationTimeout: raise fastapi.HTTPException(503, "Recurso ainda não está pronto.", headers={"Retry-After": "1"})
+    headers = {"Content-Length": str(opened.content_length), "Cache-Control": "private, max-age=31536000, immutable"}
+    if resource_id == "manifest.mpd": headers["Cache-Control"] = "private, no-cache"
+    if request.method == "HEAD": return fastapi.Response(media_type=opened.content_type, headers=headers)
+    return StreamingResponse(opened.chunks, media_type=opened.content_type, headers=headers)
 
 
 @app.api_route("/media/resource", methods=["GET", "HEAD"])

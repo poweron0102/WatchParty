@@ -7,6 +7,8 @@ const statusMessage = document.getElementById('status-message');
 const rtcModeSelect = document.getElementById('rtc-mode-select');
 const rtcModeDescription = document.getElementById('rtc-mode-description');
 const rtcModeStatus = document.getElementById('rtc-mode-status');
+const searchForm = document.getElementById('catalog-search');
+const searchInput = document.getElementById('catalog-search-input');
 let sourceId = null;
 let trail = [];
 let statusTimeout;
@@ -52,6 +54,19 @@ async function navigate(parentId = null, title = null, push = true) {
     } catch (error) { folders.innerHTML = ''; videos.innerHTML = ''; showStatus(error.message || 'Origem indisponível.', 'error'); }
 }
 function selectMedia(mediaId) { socket.emit('host_set_video', { source_id: sourceId, media_id: mediaId }); showStatus('Mídia selecionada.'); }
+searchForm.onsubmit = async event => {
+    event.preventDefault(); const query = searchInput.value.trim(); if (!query || !sourceId) return;
+    folders.innerHTML = '<p>Buscando…</p>'; videos.innerHTML = '';
+    try {
+        const response = await fetch(`/api/search?${new URLSearchParams({source_id: sourceId, q: query})}`);
+        const data = await response.json(); if (!response.ok) throw new Error(data.detail);
+        folders.innerHTML = ''; videos.innerHTML = '';
+        data.items.filter(item => item.entry_type === 'collection').forEach(item => folders.appendChild(card(item)));
+        data.items.filter(item => item.entry_type === 'playable').forEach(item => videos.appendChild(card(item)));
+        if (!folders.children.length) folders.innerHTML = '<p class="text-gray-500">Nenhuma coleção.</p>';
+        if (!videos.children.length) videos.innerHTML = '<p class="text-gray-500">Nenhum vídeo.</p>';
+    } catch (error) { folders.innerHTML = ''; videos.innerHTML = ''; showStatus(error.message || 'Busca indisponível.', 'error'); }
+};
 socket.on('media_selection_error', data => showStatus(data.message, 'error'));
 sourceSelect.onchange = () => { sourceId = sourceSelect.value; trail = []; navigate(); };
 
