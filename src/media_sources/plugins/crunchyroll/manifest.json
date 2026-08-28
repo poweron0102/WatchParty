@@ -1,0 +1,8 @@
+{
+  "type": "crunchyroll",
+  "version": "1.0.0",
+  "interface_version": 1,
+  "backend": "backend:create_source",
+  "host_module": "host.mjs",
+  "python_dependencies": ["fastapi", "httpx"]
+}

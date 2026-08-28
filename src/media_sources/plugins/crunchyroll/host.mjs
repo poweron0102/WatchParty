@@ -1,0 +1,147 @@
+function el(tag, text, className = '') {
+  const value = document.createElement(tag); if (text != null) value.textContent = text; if (className) value.className = className; return value;
+}
+function button(text) { return el('button', text, 'bg-brand text-white px-3 py-2 rounded-md disabled:opacity-50'); }
+function formatBytes(value) {
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']; let index = 0, number = Number(value || 0);
+  while (number >= 1024 && index < units.length - 1) { number /= 1024; index++; }
+  return `${number.toFixed(index ? 2 : 0)} ${units[index]}`;
+}
+
+export async function mount(context) {
+  let inventory = [], defaults = {}, presentation = null, catalogItems = [], currentParent = null, timer = null;
+  const intro = el('p', 'Cache, downloads, legendas e exportações pertencem somente a este plugin.', 'text-sm mb-3');
+  intro.style.color = 'var(--text-secondary)';
+  const mediaSelect = el('select', null, 'w-full bg-input border border-input rounded-md px-3 py-2 mb-3');
+  const summary = el('p', '', 'text-sm mb-3'); summary.style.color = 'var(--text-secondary)';
+  const refresh = button('Atualizar inventário'); const inspect = button('Carregar faixas');
+  const topActions = el('div', null, 'flex flex-wrap gap-2 mb-4'); topActions.append(refresh, inspect);
+  const tracks = el('div', null, 'flex flex-col gap-2 mb-4');
+  const download = button('Iniciar download'); const exportButton = button('Salvar como MP4');
+  const mediaActions = el('div', null, 'flex flex-wrap gap-2 mb-4'); mediaActions.append(download, exportButton);
+
+  const subtitleTitle = el('h3', 'Adicionar legenda', 'font-semibold mt-3 mb-2');
+  const subtitleFile = el('input'); subtitleFile.type = 'file'; subtitleFile.accept = '.ass,.srt,.vtt'; subtitleFile.className = 'block w-full mb-2';
+  const subtitleLanguage = el('input'); subtitleLanguage.placeholder = 'Idioma, ex.: pt-BR'; subtitleLanguage.className = 'w-full bg-input border border-input rounded-md px-3 py-2 mb-2';
+  const subtitleLabel = el('input'); subtitleLabel.placeholder = 'Rótulo opcional'; subtitleLabel.className = subtitleLanguage.className;
+  const subtitleUpload = button('Enviar legenda');
+
+  const cleanupTitle = el('h3', 'Limpeza do cache', 'font-semibold mt-5 mb-2');
+  const cleanupMode = el('select', null, mediaSelect.className);
+  [['exported','Mídias com MP4 exportado'],['quality','Qualidade de vídeo'],['partial','Parciais antigas'],['media','Mídia selecionada'],['collection','Série/temporada atual'],['orphans','Órfãos'],['all','Todo o cache de segmentos']].forEach(([value,label]) => {
+    const option = el('option', label); option.value = value; cleanupMode.appendChild(option);
+  });
+  const cleanupValue = el('input'); cleanupValue.placeholder = 'Altura (480) ou dias (30)'; cleanupValue.className = subtitleLanguage.className;
+  const cleanupPreview = button('Simular limpeza'); const cleanupRun = button('Executar limpeza'); cleanupRun.disabled = true;
+  const cleanupActions = el('div', null, 'flex flex-wrap gap-2'); cleanupActions.append(cleanupPreview, cleanupRun);
+  const cleanupResult = el('p', '', 'text-sm mt-2'); cleanupResult.style.color = 'var(--text-secondary)';
+
+  const jobsTitle = el('h3', 'Jobs desta execução', 'font-semibold mt-5 mb-2');
+  const jobs = el('div', null, 'flex flex-col gap-2 text-sm');
+  context.root.replaceChildren(intro, mediaSelect, summary, topActions, tracks, mediaActions,
+    subtitleTitle, subtitleFile, subtitleLanguage, subtitleLabel, subtitleUpload,
+    cleanupTitle, cleanupMode, cleanupValue, cleanupActions, cleanupResult, jobsTitle, jobs);
+
+  function mediaId() { return mediaSelect.value; }
+  function populateMedia() {
+    const previous = mediaSelect.value; mediaSelect.replaceChildren();
+    const all = new Map(inventory.map(item => [item.media_id, item.title]));
+    for (const item of catalogItems.filter(item => item.entry_type === 'playable')) if (!all.has(item.id)) all.set(item.id, item.title);
+    for (const [id, title] of all) { const option = el('option', title); option.value = id; mediaSelect.appendChild(option); }
+    if ([...mediaSelect.options].some(option => option.value === previous)) mediaSelect.value = previous;
+    updateSummary();
+  }
+  function updateSummary() {
+    const item = inventory.find(value => value.media_id === mediaId());
+    summary.textContent = item ? `${item.state} · ${Math.round(item.coverage * 100)}% indexado · ${formatBytes(item.cached_bytes)} · ${item.exports.length} exportação(ões)` : 'A mídia ainda não possui segmentos indexados.';
+  }
+  function isDefaultLanguage(language, configured) { return configured.some(value => value === '*' || value.toLowerCase() === String(language || '').toLowerCase()); }
+  function renderTracks() {
+    tracks.replaceChildren();
+    if (!presentation) { tracks.appendChild(el('p', 'Carregue as faixas da mídia selecionada.')); return; }
+    for (const track of presentation.tracks) {
+      const group = el('fieldset', null, 'border border-input rounded-md p-2');
+      const legend = el('legend', `${track.kind} · ${track.label || track.language || track.id}`, 'px-1'); group.appendChild(legend);
+      for (const rep of track.representations) {
+        const label = el('label', null, 'flex items-center gap-2'); const input = el('input');
+        input.type = track.kind === 'video' ? 'radio' : 'checkbox'; input.name = track.kind === 'video' ? 'cr-video-rep' : `cr-${track.kind}`;
+        input.dataset.track = track.id; input.dataset.rep = rep.id; input.dataset.kind = track.kind;
+        if (track.kind === 'video') input.checked = rep.id === presentation.canonical_video_representation;
+        else if (track.kind === 'audio') input.checked = isDefaultLanguage(track.language, defaults.audio_languages || []);
+        else input.checked = isDefaultLanguage(track.language, defaults.subtitle_languages || []);
+        const dimensions = rep.height ? `${rep.height}p` : `${Math.round((rep.bandwidth || 0) / 1000)} kbps`;
+        label.append(input, document.createTextNode(dimensions)); group.appendChild(label);
+      }
+      tracks.appendChild(group);
+    }
+  }
+  function selectionPayload() {
+    const checked = [...tracks.querySelectorAll('input:checked')];
+    return {media_id:mediaId(), video_representation:checked.find(value => value.dataset.kind === 'video')?.dataset.rep,
+      audio_tracks:checked.filter(value => value.dataset.kind === 'audio').map(value => value.dataset.track),
+      subtitle_tracks:checked.filter(value => value.dataset.kind === 'text').map(value => value.dataset.track)};
+  }
+  async function loadInventory() {
+    const data = await context.request('cache'); inventory = data.media; defaults = data.defaults; populateMedia(); renderJobs(data.jobs);
+  }
+  async function loadPresentation() {
+    if (!mediaId()) return; presentation = await context.request(`presentation?${new URLSearchParams({media_id:mediaId()})}`); renderTracks();
+  }
+  function renderJobs(values) {
+    jobs.replaceChildren();
+    for (const job of values) {
+      const row = el('div', null, 'flex flex-wrap items-center gap-2');
+      row.appendChild(el('span', `${job.kind}: ${job.state} · ${job.completed}/${job.total}${job.message ? ` · ${job.message}` : ''}${job.error ? ` · ${job.error}` : ''}`));
+      if (['queued','running','paused'].includes(job.state)) {
+        const operation = job.state === 'paused' ? 'resume' : 'pause'; const toggle = button(operation === 'pause' ? 'Pausar' : 'Retomar'); const cancel = button('Cancelar');
+        toggle.onclick = async () => { await context.request(`jobs/${job.id}/${operation}`, {method:'POST'}); await pollJobs(); };
+        cancel.onclick = async () => { await context.request(`jobs/${job.id}/cancel`, {method:'POST'}); await pollJobs(); };
+        row.append(toggle, cancel);
+      }
+      jobs.appendChild(row);
+    }
+    if (!values.length) jobs.appendChild(el('p', 'Nenhum job nesta execução.'));
+    if (values.some(job => ['queued','running','paused'].includes(job.state))) timer = setTimeout(pollJobs, 1000);
+  }
+  async function pollJobs() { const data = await context.request('jobs'); renderJobs(data.jobs); if (!data.jobs.some(job => ['queued','running','paused'].includes(job.state))) await loadInventory(); }
+  async function start(action) {
+    if (!presentation || presentation.media_id !== mediaId()) await loadPresentation();
+    const data = await context.request(action, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(selectionPayload())});
+    context.showStatus(`${data.job.kind} iniciado.`); await pollJobs();
+  }
+  refresh.onclick = () => loadInventory().catch(error => context.showStatus(error.message, 'error'));
+  inspect.onclick = () => loadPresentation().catch(error => context.showStatus(error.message, 'error'));
+  mediaSelect.onchange = () => { presentation = null; updateSummary(); renderTracks(); };
+  download.onclick = () => start('download').catch(error => context.showStatus(error.message, 'error'));
+  exportButton.onclick = () => start('export-mp4').catch(error => context.showStatus(error.message, 'error'));
+  subtitleUpload.onclick = async () => {
+    const file = subtitleFile.files[0]; if (!file || !mediaId() || !subtitleLanguage.value.trim()) { context.showStatus('Selecione mídia, arquivo e idioma.', 'error'); return; }
+    const query = new URLSearchParams({media_id:mediaId(), language:subtitleLanguage.value.trim(), label:subtitleLabel.value.trim(), filename:file.name});
+    try { await context.request(`subtitles/upload?${query}`, {method:'POST', headers:{'Content-Type':file.type || 'text/plain'}, body:file}); context.showStatus('Legenda adicionada.'); await loadPresentation(); }
+    catch (error) { context.showStatus(error.message, 'error'); }
+  };
+  function cleanupPayload() {
+    const mode = cleanupMode.value, payload = {mode};
+    if (mode === 'quality') payload.height = Number(cleanupValue.value);
+    if (mode === 'partial') payload.older_than_days = Number(cleanupValue.value || 30);
+    if (mode === 'media') payload.media_ids = [mediaId()];
+    if (mode === 'collection') payload.parent_id = currentParent || '';
+    return payload;
+  }
+  cleanupPreview.onclick = async () => {
+    try { const result = await context.request('cache/cleanup-preview', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cleanupPayload())});
+      cleanupResult.textContent = `${result.count} arquivo(s), ${formatBytes(result.bytes)}, ${result.media?.length || 0} mídia(s).`; cleanupRun.disabled = !result.count; }
+    catch (error) { context.showStatus(error.message, 'error'); }
+  };
+  cleanupRun.onclick = async () => {
+    if (!confirm(`Executar a limpeza simulada? Arquivos de cache removidos terão de ser baixados novamente.`)) return;
+    try { const result = await context.request('cache/cleanup', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cleanupPayload())});
+      context.showStatus(`${result.removed} arquivo(s) removido(s), ${formatBytes(result.bytes)} recuperados.`); cleanupRun.disabled = true; await loadInventory(); }
+    catch (error) { context.showStatus(error.message, 'error'); }
+  };
+  renderTracks(); await loadInventory();
+  return {
+    catalogRendered(state) { catalogItems = state.items; currentParent = state.parentId; populateMedia(); },
+    cleanup() { if (timer) clearTimeout(timer); context.root.replaceChildren(); },
+  };
+}

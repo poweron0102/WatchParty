@@ -114,12 +114,12 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 	versions := map[string]*versionState{}
 	seenAudio := map[string]bool{}
 	seenSubtitle := map[string]bool{}
-	languages := requestedLanguages(w.opts.AudioLanguages)
 	discovery, err := w.api.openPlayback(mediaKey, "")
 	if err != nil {
 		return presentation{}, err
 	}
 	w.api.release(mediaKey, discovery.Token)
+	languages := availableAudioLanguages(discovery, w.opts.AudioLanguages)
 	if len(languages) == 0 {
 		languages = []string{""}
 	}
@@ -183,7 +183,7 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 			if locale == "" {
 				locale = key
 			}
-			if !languageAllowed(locale, w.opts.SubtitleLanguages) || seenSubtitle[strings.ToLower(locale)] || subtitle.URL == "" {
+			if seenSubtitle[strings.ToLower(locale)] || subtitle.URL == "" {
 				continue
 			}
 			seenSubtitle[strings.ToLower(locale)] = true

@@ -1,6 +1,7 @@
 {
     "port": 5467,
     "use_cloudflare": false,
+    "allow_remote_host_admin": false,
     "playback": {
         "buffer_ahead_seconds": 30,
         "buffer_behind_seconds": 30,
@@ -36,12 +37,12 @@
                 "video_quality": "1080p",
                 "audio_quality": "192k",
                 "metadata_ttl_hours": 24,
-                "finalization_idle_minutes": 5,
                 "worker_idle_seconds": 120,
                 "max_segment_downloads": 4,
                 "max_playback_sessions": 2,
                 "worker_path": "bin\\crunchyroll-worker.exe",
                 "ffmpeg_path": "ffmpeg.exe",
+                "export_path": "D:\\Series e Filmes\\CrunchyrollExports",
                 "client_id_path": "secrets\\client_id.bin",
                 "private_key_path": "secrets\\private_key.pem"
             }

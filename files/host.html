@@ -142,6 +142,21 @@
                     <p class="text-sm mb-4" style="color: var(--text-secondary);">Escolha o catálogo que deseja navegar.</p>
                     <label for="source-select" class="block text-sm font-medium mb-2">Catálogo ativo</label>
                     <select id="source-select" class="w-full bg-input border border-input rounded-md px-3 py-2 focus:outline-none focus:ring-2 ring-brand"></select>
+                    <ul id="source-diagnostics" class="text-sm mt-3 text-red-300"></ul>
+                </div>
+
+                <div class="bg-card p-6 rounded-lg shadow-lg">
+                    <h2 class="text-xl font-semibold mb-2" style="color: var(--text-primary);">Acesso administrativo</h2>
+                    <label class="flex items-center gap-3">
+                        <input id="remote-host-admin-toggle" type="checkbox" class="h-5 w-5">
+                        <span>Permitir administração remota sem autenticação</span>
+                    </label>
+                    <p id="remote-host-admin-status" class="text-sm mt-3" style="color: var(--text-secondary);" role="status"></p>
+                </div>
+
+                <div id="source-extension-card" class="bg-card p-6 rounded-lg shadow-lg hidden">
+                    <h2 id="source-extension-title" class="text-xl font-semibold mb-4" style="color: var(--text-primary);">Ferramentas da origem</h2>
+                    <div id="source-extension-root"></div>
                 </div>
 
             </div>
@@ -182,6 +197,6 @@
     </div>
 
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-    <script src="host.js?v=3"></script>
+    <script src="host.js?v=4"></script>
 </body>
 </html>

@@ -1,4 +1,5 @@
 import hashlib
+import ipaddress
 import os
 import secrets
 import sys
@@ -12,7 +13,8 @@ from starlette.responses import FileResponse, StreamingResponse
 from typing import Literal
 
 from config import (CACHE_DIR, FILES_DIR, ICE_SERVERS, MEDIA_SOURCES, PLAYBACK_CONFIG, PORT,
-                    TURN_CONFIGURED, TURN_CREDENTIAL_TTL, TURN_HOST, TURN_PORT, TURN_SECRET)
+                    TURN_CONFIGURED, TURN_CREDENTIAL_TTL, TURN_HOST, TURN_PORT, TURN_SECRET,
+                    persist_remote_host_admin)
 from media_sources import (ByteRangeRequest, CollectionNotFound, InvalidByteRange,
                            MediaItemNotFound, ResourceNotFound, SourceNotFound,
                            SourceReadError, SourceUnavailable)
@@ -24,7 +26,7 @@ from playback import PlaybackModule, PlaybackSelection, ResourceRequest
 from playback.models import (InvalidPlaybackResource, MaterializationTimeout, PlaybackExpired,
                              PlaybackNotFound, PlaybackPaused)
 
-PLAYBACK = PlaybackModule(MEDIA_SOURCES.playback_origins(), os.path.join(CACHE_DIR, "playback"),
+PLAYBACK = PlaybackModule(MEDIA_SOURCES.playback_origins(),
                           wait_timeout=PLAYBACK_CONFIG["segment_wait_timeout_seconds"])
 
 
@@ -32,16 +34,19 @@ class RtcModeUpdate(BaseModel):
     mode: Literal["off", "auto", "relay"]
 
 
-def _resource_url(source_id: str, resource_id: str) -> str:
+def _resource_url(source_id: str, resource_id: str, revision: str | None = None) -> str:
     from urllib.parse import urlencode
-    return "/media/resource?" + urlencode({"source_id": source_id, "resource_id": resource_id})
+    values = {"source_id": source_id, "resource_id": resource_id}
+    if revision:
+        values["v"] = revision
+    return "/media/resource?" + urlencode(values)
 
 
 def _serialize_resource(source_id, resource):
     if resource is None:
         return None
     data = asdict(resource)
-    data["url"] = _resource_url(source_id, resource.id)
+    data["url"] = _resource_url(source_id, resource.id, resource.revision)
     return data
 
 
@@ -74,6 +79,38 @@ def _parse_range(value: str | None) -> ByteRangeRequest | None:
         raise InvalidByteRange("intervalo inválido") from exc
 
 
+def _is_loopback(request: Request) -> bool:
+    try:
+        return bool(request.client and ipaddress.ip_address(request.client.host).is_loopback)
+    except ValueError:
+        return False
+
+
+def _host_is_loopback(hostname: str | None) -> bool:
+    try:
+        return hostname == "localhost" or ipaddress.ip_address(hostname or "").is_loopback
+    except ValueError:
+        return False
+
+
+def _require_host_access(request: Request) -> None:
+    if not server_state["allow_remote_host_admin"] and not (
+        _is_loopback(request) and _host_is_loopback(request.url.hostname)
+    ):
+        raise fastapi.HTTPException(403, "Administração do host restrita ao localhost.")
+
+
+def _require_local_toggle(request: Request) -> None:
+    if not _is_loopback(request) or not _host_is_loopback(request.url.hostname):
+        raise fastapi.HTTPException(403, "Esta configuração só pode ser alterada pelo localhost.")
+    origin = request.headers.get("origin")
+    if origin:
+        from urllib.parse import urlparse
+        parsed = urlparse(origin)
+        if not _host_is_loopback(parsed.hostname):
+            raise fastapi.HTTPException(403, "Origem da requisição não permitida.")
+
+
 @app.get("/")
 async def get_index():
     return FileResponse(os.path.join(FILES_DIR, "index.html"))
@@ -85,13 +122,77 @@ async def get_party():
 
 
 @app.get("/host")
-async def get_host_page():
+@app.get("/host.html")
+async def get_host_page(request: Request):
+    _require_host_access(request)
     return FileResponse(os.path.join(FILES_DIR, "host.html"))
 
 
 @app.get("/api/sources")
 async def list_sources():
-    return {"sources": [asdict(summary) for summary in MEDIA_SOURCES.summaries]}
+    return {"sources": [asdict(summary) for summary in MEDIA_SOURCES.summaries],
+            "diagnostics": [asdict(item) for item in MEDIA_SOURCES.diagnostics]}
+
+
+@app.get("/api/host/remote-access")
+async def get_remote_host_access(request: Request):
+    _require_host_access(request)
+    return {"enabled": bool(server_state["allow_remote_host_admin"]), "canChange": _is_loopback(request)}
+
+
+@app.put("/api/host/remote-access")
+async def set_remote_host_access(request: Request, payload: dict):
+    _require_local_toggle(request)
+    enabled = payload.get("enabled")
+    if not isinstance(enabled, bool):
+        raise fastapi.HTTPException(422, "enabled deve ser booleano.")
+    try:
+        persist_remote_host_admin(enabled)
+    except RuntimeError as exc:
+        raise fastapi.HTTPException(500, str(exc)) from exc
+    server_state["allow_remote_host_admin"] = enabled
+    return {"enabled": enabled, "canChange": True}
+
+
+@app.get("/host/{source_id}/module.js")
+async def get_source_host_module(request: Request, source_id: str):
+    _require_host_access(request)
+    try:
+        module = MEDIA_SOURCES.host_module(source_id)
+    except Exception as exc:
+        raise _media_error(exc) from exc
+    return FileResponse(module, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+
+@app.api_route("/host/{source_id}/{action:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+async def source_host_action(request: Request, source_id: str, action: str):
+    _require_host_access(request)
+    try:
+        source = MEDIA_SOURCES.get(source_id)
+    except Exception as exc:
+        raise _media_error(exc) from exc
+    handler = getattr(source, "handle_host_action", None)
+    if handler is None:
+        raise fastapi.HTTPException(404, "Ação administrativa não encontrada.")
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > 64 * 1024 * 1024:
+                raise fastapi.HTTPException(413, "Payload administrativo excede 64 MiB.")
+        except ValueError:
+            raise fastapi.HTTPException(400, "Content-Length inválido.")
+    try:
+        result = await handler(action.strip("/"), request)
+    except fastapi.HTTPException:
+        raise
+    except KeyError as exc:
+        raise fastapi.HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        print(f"Falha na ação {source_id}/{action}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        raise fastapi.HTTPException(500, "Ação administrativa falhou.") from exc
+    if result is None:
+        raise fastapi.HTTPException(404, "Ação administrativa não encontrada.")
+    return result
 
 
 @app.get("/api/catalog")
@@ -103,7 +204,8 @@ async def browse_catalog(source_id: str, parent_id: str | None = None, cursor: s
     items = []
     for item in page.items:
         data = asdict(item)
-        data["image"] = _serialize_resource(source_id, item.image)
+        for field in ("image", "poster", "thumbnail"):
+            data[field] = _serialize_resource(source_id, getattr(item, field))
         items.append(data)
     return {"items": items, "next_cursor": page.next_cursor}
 
@@ -116,7 +218,8 @@ async def get_media(source_id: str, media_id: str):
         raise _media_error(exc) from exc
     data = asdict(item)
     data["video"] = _serialize_resource(source_id, item.video)
-    data["image"] = _serialize_resource(source_id, item.image)
+    for field in ("image", "poster", "thumbnail"):
+        data[field] = _serialize_resource(source_id, getattr(item, field))
     for group in ("audio_tracks", "subtitles"):
         for track in data[group]:
             track["url"] = _resource_url(source_id, track["resource_id"])
@@ -131,7 +234,10 @@ async def search_catalog(source_id: str, q: str, cursor: str | None = None):
         raise _media_error(exc) from exc
     items = []
     for item in page.items:
-        data = asdict(item); data["image"] = _serialize_resource(source_id, item.image); items.append(data)
+        data = asdict(item)
+        for field in ("image", "poster", "thumbnail"):
+            data[field] = _serialize_resource(source_id, getattr(item, field))
+        items.append(data)
     return {"items": items, "next_cursor": page.next_cursor}
 
 
@@ -171,7 +277,7 @@ async def playback_asset(request: Request, playback_id: str, resource_id: str):
 
 
 @app.api_route("/media/resource", methods=["GET", "HEAD"])
-async def stream_resource(request: Request, source_id: str, resource_id: str):
+async def stream_resource(request: Request, source_id: str, resource_id: str, v: str | None = None):
     source = None
     try:
         source = MEDIA_SOURCES.get(source_id)

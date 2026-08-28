@@ -23,7 +23,7 @@ Aplicação Python para assistir a vídeos sincronizados com amigos. Os catálog
 }
 ```
 
-O diretório deve existir e ser legível. IDs precisam ser únicos e podem conter letras, números, ponto, hífen e sublinhado. Mudanças exigem reiniciar o processo.
+O diretório deve existir e ser legível. IDs precisam ser únicos e podem conter letras, números, ponto, hífen e sublinhado. Mudanças exigem reiniciar o processo. Tipos de Source são plugins descobertos em `src/media_sources/plugins`; consulte `docs/media-source-plugins.md`.
 
 3. Execute `python src/main.py` e abra `http://localhost:5467/host`.
 
@@ -39,17 +39,24 @@ cookie `etp_rt` somente em `save.json` e mantenha `worker_path` como
 `tools/crunchyroll-worker/README.md`. Esses arquivos são segredos locais e estão ignorados
 pelo Git; tokens, URLs de playback, licenças e chaves nunca são persistidos pelo processo Python.
 
-Vídeos aceitos: MP4, MKV, WebM e AVI. Sidecars ficam junto ao vídeo nas convenções `.subs/<nome>.<idioma>.vtt`, `.dubs/<nome>.<idioma>.mp3|aac|ogg` e `.previews/<nome>_banner.png`. Coleções podem usar `.previews/banner.png`.
+O plugin Crunchyroll mantém seu próprio índice em `<cache_path>/.crunchyroll/cache.sqlite3`.
+No painel do host é possível inspecionar cobertura, escolher qualidade/áudios/legendas, iniciar
+download, adicionar ASS/SRT/VTT, limpar grupos de segmentos e executar `Salvar como MP4`.
+MP4 nunca é criado automaticamente; jobs continuam ao fechar o navegador, mas não sobrevivem
+ao reinício do servidor.
+
+Vídeos aceitos: MP4, MKV, WebM e AVI. Sidecars ficam junto ao vídeo nas convenções `.subs/<nome>.<idioma>.vtt` e `.dubs/<nome>.<idioma>.mp3|aac|ogg`. Imagens usam `.previews/<nome>_poster.png`, `.previews/<nome>_thumbnail.png`, `.previews/poster.png` e `.previews/thumbnail.png`; os nomes antigos com `banner.png` continuam aceitos para compatibilidade.
 
 ## Docker e TURN
 
-Copie `.env.example` para `.env`. O Compose monta `WATCHPARTY_MEDIA_DIR` em `/media`, somente para leitura, e usa `docker/save.json`. Para várias origens, adicione mounts somente leitura ao Compose e os respectivos caminhos internos ao arquivo JSON.
+Copie `.env.example` para `.env`. O Compose monta `WATCHPARTY_MEDIA_DIR` em `/media` com leitura e escrita para `.previews` e `.watchparty`, e usa `docker/save.json` gravável para persistir o toggle administrativo. Para várias origens, adicione mounts graváveis e os respectivos caminhos internos ao arquivo JSON.
 
 Execute `docker compose up -d --build`. Configure `TURN_HOST` e um `TURN_SECRET` longo; publique as portas TURN indicadas no Compose. O modo WebRTC pode ser alterado no painel do host.
 
 ## Banners administrativos
 
-O servidor nunca escreve nas origens. Gere thumbnails explicitamente com:
+O plugin `directory` pode escrever pôsteres e thumbnails diretamente em `.previews` pelo painel.
+Como alternativa administrativa em lote, use:
 
 ```bash
 python make_banners.py

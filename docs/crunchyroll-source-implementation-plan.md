@@ -1,12 +1,12 @@
 # Plano de implementação: `CrunchyrollSource` com cache read-through segmentado
 
-Status: aprovado para planejamento; implementação ainda não iniciada.
+Status: implementação ativa. A arquitetura de plugins, cache SQLite por instância e fluxo manual de download/exportação substituem as decisões antigas de finalização automática.
 
 ## Resultado esperado
 
 Adicionar ao WatchParty uma Source privada para pesquisar e navegar pelo catálogo da Crunchyroll e reproduzir mídia por MPEG-DASH local enquanto os segmentos necessários são baixados, descriptografados, validados e armazenados. O cache é esparso: assistir, buscar uma posição ou selecionar uma faixa materializa somente os intervalos efetivamente demandados pelo player, mais a representação canônica correspondente de vídeo.
 
-Quando houver cobertura completa da representação canônica de vídeo e de pelo menos um áudio, o sistema materializa um MP4 permanente e publica os sidecars completos. Esse conteúdo continua navegável e reproduzível por uma `DirectorySource`, inclusive sem autenticação ou rede.
+Um MP4 só é produzido quando o host executa explicitamente `Salvar como MP4`. O job completa os segmentos selecionados que ainda estiverem ausentes, incorpora os áudios e legendas escolhidos e publica a saída atomicamente no `export_path`. Não existe finalização automática por cobertura ou inatividade.
 
 Toda reprodução audiovisual passa por um `PlaybackModule` central e por um manifesto DASH local. `CrunchyrollSource` e `DirectorySource` são Adapters da mesma Interface interna de origem segmentada; o frontend não conhece as diferenças entre arquivo local, cache parcial, download remoto, DRM, remux ou transcode.
 
@@ -54,25 +54,19 @@ Este plano usa como referência o código MIT disponível em `C:\Users\Tecnologi
 - Uma apresentação substituída expira imediatamente. Requisições atrasadas recebem `410 Gone`, tratado silenciosamente pelo `PlayerController` quando a seleção já mudou.
 - Cancelar no painel coloca a apresentação em `download_paused`: recursos prontos continuam reproduzíveis, mas recursos ausentes não reiniciam trabalho até `retomar`.
 - Coberturas parciais e segmentos completos permanecem indefinidamente neste ciclo. O schema registra último acesso, tamanho e descartabilidade para permitir LRU/TTL futuro, mas não remove nada automaticamente.
-- Segmentos claros são cache derivado, não autoridade. Depois de publicado o MP4, segmentos ausentes podem ser regenerados localmente sem acessar a Crunchyroll.
+- Segmentos claros são cache derivado e podem ser removidos pelo menu da Crunchyroll. Um MP4 exportado é independente do cache, mas não é usado silenciosamente para reconstruir segmentos.
 - Cache parcial continua reproduzível offline nos intervalos presentes; um buraco exige rede e produz estado operacional somente para o host.
 
-### Faixas e publicação permanente
+### Faixas e exportação manual
 
 - Todas as faixas descobertas aparecem no player; áudio e legenda só são materializados quando algum navegador os seleciona.
 - Legendas são baixadas como arquivos completos na primeira seleção. ASS é preservado e convertido para WebVTT.
-- A mídia só é elegível para MP4 quando uma única representação canônica de vídeo e pelo menos uma única faixa de áudio têm cobertura integral.
-- Áudios parciais complementares nunca são misturados para formar uma faixa completa.
-- Se não houver faixa audiovisual parcial, a finalização pode começar imediatamente.
-- Se houver qualquer vídeo ou áudio parcial, aguardar `finalization_idle_minutes`, padrão 5, sem progresso em nenhuma faixa audiovisual.
-- Ao começar, a finalização congela um snapshot. Novos segmentos não alteram nem cancelam esse FFmpeg.
-- Entre os áudios completos do snapshot, incorporar no MP4 o primeiro segundo a ordem de `audio_languages`, nunca o primeiro que terminou.
-- Outros áudios completos do snapshot são publicados como M4A. Faixas incompletas não bloqueiam nem aparecem na publicação pública.
-- Áudio concluído depois da publicação vira M4A; o MP4 não é reescrito.
-- FFmpeg iniciado não é cancelado por novos segmentos, troca de mídia, cancelamento ou shutdown normal. O shutdown normal aguarda sua conclusão; falha fatal ou encerramento forçado continuam possíveis.
-- Remuxar quando os codecs forem compatíveis com MP4; transcodificar somente quando necessário para produzir H.264/AAC válido.
-- Arquivos públicos completos são permanentes: o programa não os remove nem renomeia automaticamente.
-- Sidecars completos e imagens são publicados antes do MP4; o manifesto público é atualizado por último. Recursos tardios são adicionados atomicamente sem reescrever o MP4.
+- O host escolhe exatamente uma representação de vídeo e zero ou mais faixas de áudio e legenda; os padrões da Source aparecem pré-selecionados.
+- O job manual completa todos os segmentos ausentes dessa seleção antes de iniciar FFmpeg.
+- Áudios e legendas são incorporados como faixas selecionáveis; legendas não são queimadas no vídeo.
+- Uploads ASS, SRT e VTT preservam o original e produzem um derivado WebVTT para playback.
+- A saída é escrita em pasta temporária e publicada por rename atômico; colisões geram um novo nome e nunca sobrescrevem silenciosamente.
+- O job continua se o navegador fechar, mas não sobrevive ao restart do processo. Segmentos completos permanecem no SQLite e um novo job retoma pelos ausentes.
 
 ### Segurança e disponibilidade
 
@@ -84,17 +78,15 @@ Este plano usa como referência o código MIT disponível em `C:\Users\Tecnologi
 - Worker, FFmpeg, autenticação ou Widevine indisponíveis degradam somente operações dependentes deles.
 - Arquivos completos e derivados locais continuam reproduzíveis quando a Crunchyroll estiver indisponível.
 - O SQLite oculto é índice derivado. Arquivos, hashes e manifestos são a autoridade para materializações.
-- Uma `CrunchyrollSource` pode escrever seu cache enquanto uma `DirectorySource` o lê e mantém derivados próprios em `.watchparty`.
+- Cada plugin é proprietário de seus derivados. O core não interpreta nem remove o cache da Crunchyroll.
 
 ## Fora de escopo
 
-- UI customizada por Source ou plugins de ações no frontend.
-- Operação externa `Download the cache` que percorre e completa todas as mídias parciais.
-- Limpeza automática, quota, LRU ou TTL de segmentos derivados.
+- Limpeza automática, quota, LRU ou TTL de segmentos derivados. Toda limpeza é explícita no menu da Source.
 - Autenticação de usuários do WatchParty, URLs assinadas ou DRM no navegador.
 - Salas múltiplas e mais de uma party simultânea.
 
-O desenho deve, porém, criar um `MaterializationPlanner` interno reutilizável. Playback envia demandas pontuais; uma futura ferramenta equivalente a `make_banners.py` poderá enviar demandas para todos os segmentos ausentes sem duplicar scheduler, cache ou worker.
+O `host.mjs` da Crunchyroll oferece inventário, download completo selecionável, upload de legendas, exportação MP4 e limpeza agregada. O plugin reutiliza sua materialização tanto para playback quanto para jobs manuais.
 
 ## Contrato de configuração
 
@@ -130,12 +122,12 @@ Registrar `crunchyroll` com estas opções:
     "video_quality": "1080p",
     "audio_quality": "192k",
     "metadata_ttl_hours": 24,
-    "finalization_idle_minutes": 5,
     "worker_idle_seconds": 120,
     "max_segment_downloads": 4,
     "max_playback_sessions": 2,
     "worker_path": "bin\\crunchyroll-worker.exe",
     "ffmpeg_path": "ffmpeg.exe",
+    "export_path": "D:\\CrunchyrollExports",
     "widevine_device_path": "device.wvd"
   }
 }
@@ -169,7 +161,7 @@ Regras:
 - `hardware_acceleration: auto` tenta NVENC, Quick Sync e AMF quando compatíveis e usa software como fallback. A falta de aceleração nunca inviabiliza playback por si só.
 - O diretório configurado na `DirectorySource` precisa permitir a criação de `.watchparty` para playback. Se não permitir, browse continua disponível e a capability de playback fica indisponível.
 - Campos desconhecidos e combinações inválidas falham com `InvalidSourceConfiguration`, sem valores secretos na mensagem.
-- Alterar política cria uma nova revisão de apresentação e reaproveita artefatos compatíveis por identidade. A finalização usa o snapshot da política da ativação atual.
+- Alterar política cria uma nova revisão de apresentação. O SQLite indexa segmentos por mídia, revisão, faixa, representação e identidade.
 
 ## Interfaces e módulos
 
@@ -368,7 +360,7 @@ Criar `tools/crunchyroll-worker/` importando somente código necessário e prese
 - Cada comando e evento carrega versão, request ID, media key e correlation ID; respostas fora de ordem são permitidas.
 - Eventos mínimos: `started`, `stage`, `progress`, `warning`, `asset`, `retrying`, `completed`, `failed`, `released`.
 - Após `worker_idle_seconds` sem demandas, liberar sessões e encerrar. Nova demanda cria processo usando o cache persistido.
-- Desativação cancela fila, permite terminar segmentos já iniciados, libera sessões e encerra. FFmpeg de finalização é processo separado.
+- Desativação cancela fila, permite terminar segmentos já iniciados, libera sessões e encerra. Exportações em andamento são jobs transitórios do plugin.
 
 ### MPD, DRM e materialização
 
@@ -388,22 +380,19 @@ Criar `tools/crunchyroll-worker/` importando somente código necessário e prese
 - Legendas ASS são arquivos completos e só são baixadas na primeira seleção.
 - Imagens e metadados de catálogo vêm do cliente Python/API, pois o downloader de referência não os modela.
 
-## Scheduler, cobertura e finalização
+## Scheduler, cobertura e exportação manual
 
-`MaterializationPlanner` e `SegmentStore` ficam no processo Python; o worker é Adapter de origem remota.
+O plugin Crunchyroll possui SQLite e blob store próprios; o worker é Adapter da origem remota. O `PlaybackModule` não cria uma segunda cópia desses artefatos.
 
 - Registrar demandas e consumidores sem expor detalhes do worker ao HTTP.
 - Coalescer pedidos concorrentes numa future single-flight.
 - Cancelar demandas sem consumidores apenas enquanto ainda estão na fila.
 - Ao demandar vídeo no intervalo T, agendar também a representação canônica que cobre T; deduplicar quando for a mesma.
-- Persistir transições antes/depois de iniciar trabalho e reconciliar `fetching` abandonado no startup.
+- Registrar segmentos completos atomicamente e reconciliar banco, temporários e órfãos no startup.
 - Um novo playback sob política diferente cria revisão nova e reutiliza segmentos cuja identidade é compatível.
-- O relógio de finalização é controlável em testes e pertence ao scheduler, não ao worker ocioso.
-- Ao atingir elegibilidade, observar quietude audiovisual configurável e congelar snapshot.
-- Rodar FFmpeg de finalização em prioridade operacional baixa, concorrente com playback, fora do limite de quatro transferências.
-- Publicar sidecars completos, MP4 e manifesto na ordem definida; usar arquivos temporários confinados e renames atômicos.
-- Falha de FFmpeg preserva segmentos e snapshot para retry; nunca deixa saída pública parcial.
-- Áudio/legenda que completar tarde pode ser publicado como sidecar sem alterar MP4.
+- Download manual usa as faixas selecionadas e preserva prioridade do playback.
+- Exportação roda somente por ação do host, completa ausências, cria snapshot de entradas e usa arquivos temporários confinados.
+- Falha de FFmpeg preserva segmentos para nova tentativa e nunca deixa saída pública parcial.
 
 ## Player, sockets e interface
 
@@ -416,7 +405,7 @@ Criar `tools/crunchyroll-worker/` importando somente código necessário e prese
 - Sincronizar velocidade do host e aplicar correção suave/seek segundo os thresholds globais.
 - Um participante que recupera buffer volta ao relógio do host sem pausar a party.
 - Tratar `410` de apresentação antiga, aborts, retries e download pausado como lifecycle esperado, sem mensagens de erro ao usuário.
-- Host vê buffer atual, cobertura canônica, cobertura por áudio selecionado, bytes armazenados, filas, sessões, retries e estado de finalização.
+- Host vê cobertura por faixa, bytes armazenados, jobs desta execução, exportações e simulação de limpeza.
 - Participantes veem somente carregamento e falhas genéricas; nunca recebem caminhos, cookies, URLs temporárias ou detalhes DRM.
 - Manter ações de pausar materialização, retomar e tentar novamente no painel do host.
 
@@ -430,12 +419,14 @@ Criar `tools/crunchyroll-worker/` importando somente código necessário e prese
 - `src/playback/scheduler.py`: prioridade, single-flight, consumidores, retries e `MaterializationPlanner`.
 - `src/playback/store.py`: artefatos, hashes, cobertura, reconciliação e locks.
 - `src/playback/http.py` ou rotas equivalentes: manifesto e assets.
-- `src/media_sources/directory.py`: browse e recursos estáticos preservados.
-- `src/media_sources/directory_playback.py`: FFprobe, segmentação, remux e transcode.
-- `src/media_sources/crunchyroll.py`: catálogo, busca, resolução e Adapter de playback.
-- `src/media_sources/crunchyroll_api.py`: autenticação, catálogo, pacing, retry e redaction.
-- `src/media_sources/crunchyroll_cache.py`: cache público, manifestos, índice e publicação.
-- `src/media_sources/crunchyroll_worker.py`: processo persistente e protocolo JSON Lines.
+- `src/media_sources/plugins/directory/source_core.py`: browse, recursos e convenções `.previews`.
+- `src/media_sources/plugins/directory/playback.py`: FFprobe, segmentação, remux e transcode.
+- `src/media_sources/plugins/directory/backend.py` e `host.mjs`: factory e ferramentas administrativas.
+- `src/media_sources/plugins/crunchyroll/catalog_core.py`: catálogo, busca e resolução.
+- `src/media_sources/plugins/crunchyroll/api.py`: autenticação, pacing, retry e redaction.
+- `src/media_sources/plugins/crunchyroll/cache.py`: SQLite, segmentos, anexos, exportações e limpeza.
+- `src/media_sources/plugins/crunchyroll/worker_client.py`: processo persistente e protocolo JSON Lines.
+- `src/media_sources/plugins/crunchyroll/source.py` e `host.mjs`: Adapter gerenciado e painel específico.
 - `src/media_sources/registry.py`: factories, capabilities e validação.
 
 Os nomes podem mudar durante implementação, mas a seam `PlaybackModule` -> `PlaybackOrigin` e a separação entre cache derivado e autoridade pública são obrigatórias.
@@ -532,23 +523,22 @@ Critério: dois áudios podem ser materializados concorrentemente com chaves dis
 
 Critério: ABR em duas qualidades produz somente os segmentos demandados e a canônica correspondente; troca de episódio cancela fila antiga; segmento iniciado termina uma única vez.
 
-### 8. Implementar finalização e publicação
+### 8. Implementar download e exportação manuais
 
-1. Detectar cobertura integral de uma representação canônica e de um áudio.
-2. Implementar quietude configurável com fake clock e snapshot imutável.
-3. Escolher áudio por prioridade de configuração no snapshot.
-4. Executar FFmpeg não cancelável em baixa prioridade e com shutdown gracioso.
-5. Publicar sidecars, MP4 e manifesto atomicamente.
-6. Publicar faixas tardias como sidecars sem reescrever MP4.
-7. Regenerar derivados DASH a partir do MP4 quando necessário.
+1. Exibir todas as qualidades, áudios e legendas, pré-selecionando a configuração.
+2. Completar sob demanda a seleção do host e registrar cobertura no SQLite.
+3. Aceitar ASS, SRT e VTT locais, preservando original e VTT derivado.
+4. Executar FFmpeg somente após `Salvar como MP4`.
+5. Publicar MP4 e sidecars atomicamente no `export_path` sem sobrescrita silenciosa.
+6. Manter jobs somente em memória e reutilizar segmentos completos após restart.
 
-Critério: chegada durante FFmpeg não muda a saída; áudio prioritário tardio vira M4A; falha em qualquer etapa não expõe MP4 parcial.
+Critério: nenhuma cobertura inicia exportação sozinha; falha em qualquer etapa não expõe MP4 parcial.
 
 ### 9. Integrar painel e estados operacionais
 
 1. Adicionar busca e paginação ao painel.
 2. Renderizar coleções virtuais e imagens nomeadas.
-3. Mostrar buffer, cobertura, bytes, fila, sessões, retries e finalização ao host.
+3. Mostrar cobertura, bytes, faixas, jobs, exportações e limpeza ao host.
 4. Adicionar pausar materialização, retomar e tentar novamente.
 5. Tratar lifecycle esperado sem notificações espúrias.
 6. Manter participantes livres de detalhes operacionais sensíveis.
@@ -562,7 +552,7 @@ Critério: host pesquisa, seleciona, assiste durante download, troca faixa, busc
 3. Testar corrupção, truncamento, crash, restart, sessão expirada e rate limits.
 4. Testar redaction de cookie, tokens, URLs, licenças, chaves, query strings e paths.
 5. Testar concorrência entre `CrunchyrollSource`, `DirectorySource`, readers e writers.
-6. Validar shutdown aguardando finalização e liberando sessões.
+6. Validar shutdown interrompendo jobs transitórios, removendo temporários e liberando sessões.
 
 Critério: aplicação inicia com dependências remotas ausentes; cache completo e intervalos parciais disponíveis continuam reproduzíveis; nenhum teste ou log contém segredo.
 
@@ -572,8 +562,8 @@ Critério: aplicação inicia com dependências remotas ausentes; cache completo
 2. Documentar configuração local do cookie e dispositivo Widevine sem registrar conteúdo.
 3. Documentar Shaka hospedado, licenças, build do worker, FFmpeg e aceleração opcional.
 4. Documentar caches `.crunchyroll` e `.watchparty`, permissões, falta de espaço, exclusão manual e reconstrução.
-5. Documentar playback parcial offline, finalização, mudança de política e sidecars tardios.
-6. Registrar `Download the cache`, UI extensível e limpeza automática somente como evoluções futuras.
+5. Documentar cache SQLite, jobs transitórios, exportação manual e sidecars.
+6. Documentar plugins de Source, `host.mjs` e namespace `/host/<source_id>/<action>`.
 7. Confirmar que `save.json`, dispositivos Widevine, binários privados, logs e temporários não entram no Git.
 
 Critério: instalação Windows limpa pode ser configurada somente pelo README; artefatos versionados e histórico Git não contêm segredos.
@@ -592,7 +582,7 @@ Critério: instalação Windows limpa pode ser configurada somente pelo README; 
 - Cache: hash, rename atômico, cobertura esparsa, corrupção, crash, restart, read-only, disco cheio e política nova.
 - Offline: segmento parcial presente, buraco ausente, MP4 completo e regeneração local de derivados.
 - Directory: MP4, MKV, WebM, AVI, keyframes, remux, transcode, hardware fallback, sidecars e alteração do original.
-- Finalização: elegibilidade, quietude, snapshot, prioridade de áudio, chegada tardia, FFmpeg não cancelado e falha por etapa.
+- Exportação manual: seleção de faixas, conclusão de ausências, snapshot, FFmpeg, publicação atômica e falha por etapa.
 - Sincronização: host buffering, participante buffering, drift suave, hard seek, velocidade global e reconexão.
 - Segurança: traversal, IDs de outra apresentação, symlink/junction, redaction e cookie fora de argv/stdout/respostas.
 - UI: busca, cobertura, seleção individual de faixa, qualidade, pausa, retry e ausência de erros esperados.

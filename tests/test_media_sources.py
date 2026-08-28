@@ -30,12 +30,14 @@ class RegistryTests(unittest.TestCase):
                     {"id":"one","type":"directory","label":"Two","options":{"path":root}},
                 ])
 
-    def test_unknown_empty_and_invalid_options_are_rejected(self):
+    def test_unknown_and_invalid_plugin_sources_are_isolated(self):
         with tempfile.TemporaryDirectory() as root:
-            cases = [[], [{"id":"x","type":"unknown","label":"X","options":{}}],
-                     [{"id":"x","type":"directory","label":"X","options":{"path":root,"private":1}}]]
-            for case in cases:
-                with self.subTest(case=case), self.assertRaises(InvalidSourceConfiguration): build_source_registry(case)
+            empty = build_source_registry([]); self.assertEqual(empty.summaries, ())
+            unknown = build_source_registry([{"id":"x","type":"unknown","label":"X","options":{}}])
+            self.assertEqual(unknown.summaries, ()); self.assertIn("plugin ausente", unknown.diagnostics[0].message)
+            invalid = build_source_registry([{"id":"x","type":"directory","label":"X","options":{"path":root,"private":1}}])
+            self.assertEqual(invalid.summaries, ()); self.assertIn("InvalidSourceConfiguration", invalid.diagnostics[0].message)
+            with self.assertRaises(InvalidSourceConfiguration): build_source_registry([{"id":"bad space","type":"directory","label":"X","options":{"path":root}}])
 
 
 class DirectorySourceTests(unittest.IsolatedAsyncioTestCase):
@@ -46,6 +48,8 @@ class DirectorySourceTests(unittest.IsolatedAsyncioTestCase):
         (self.root / ".subs").mkdir(); (self.root / ".subs" / "zeta.pt.vtt").write_text("WEBVTT", encoding="utf-8")
         (self.root / ".subs" / "zeta 2.pt.vtt").write_text("WEBVTT", encoding="utf-8")
         (self.root / ".dubs").mkdir(); (self.root / ".dubs" / "zeta.en.mp3").write_bytes(b"audio")
+        (self.root / ".previews").mkdir(); (self.root / ".previews" / "zeta_thumbnail.png").write_bytes(b"png")
+        (self.root / "Series" / ".previews").mkdir(); (self.root / "Series" / ".previews" / "poster.png").write_bytes(b"png")
         self.source = DirectorySource(self.root)
 
     async def asyncTearDown(self): self.temp.cleanup()
@@ -54,6 +58,8 @@ class DirectorySourceTests(unittest.IsolatedAsyncioTestCase):
         page = await self.source.browse()
         self.assertEqual([item.title for item in page.items], ["Series", "Alpha.mkv", "zeta.mp4"])
         self.assertEqual(page.items[0].entry_type.value, "collection")
+        self.assertIsNotNone(page.items[0].poster)
+        self.assertIsNotNone(page.items[-1].thumbnail)
 
     async def test_item_sidecars_respect_separator_and_resources_are_private(self):
         item = await self.source.get_item("zeta.mp4")

@@ -15,6 +15,7 @@ class MediaResource:
     id: str
     content_type: str
     size: int | None = None
+    revision: str | None = None
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,8 @@ class SourceSummary:
     id: str
     label: str
     capabilities: tuple[str, ...] = ("browse", "stream")
+    type: str | None = None
+    host_module: str | None = None
 
 
 @dataclass(frozen=True)
@@ -31,6 +34,8 @@ class CatalogEntry:
     entry_type: EntryType
     media_kind: str | None = None
     image: MediaResource | None = None
+    poster: MediaResource | None = None
+    thumbnail: MediaResource | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +60,8 @@ class MediaItem:
     audio_tracks: tuple[MediaTrack, ...] = ()
     subtitles: tuple[MediaTrack, ...] = ()
     image: MediaResource | None = None
+    poster: MediaResource | None = None
+    thumbnail: MediaResource | None = None
 
 
 @dataclass(frozen=True)

@@ -44,6 +44,14 @@ func TestRequestedLanguagesAreOrderedAndDeduplicated(t *testing.T) {
 	}
 }
 
+func TestAvailableAudioLanguagesKeepsConfiguredDefaultsFirstAndDiscoversRest(t *testing.T) {
+	stream := playbackResponse{AudioLocale: "ja-JP", Versions: []playbackVersion{{AudioLocale: "en-US"}, {AudioLocale: "pt-BR"}}}
+	got := availableAudioLanguages(stream, []string{"pt-BR"})
+	if len(got) != 3 || got[0] != "pt-BR" || got[1] != "ja-JP" || got[2] != "en-US" {
+		t.Fatalf("languages=%v", got)
+	}
+}
+
 func TestSubtitleTrackIsExposedAsWebVTTResource(t *testing.T) {
 	tr := subtitleTrack("episode", "pt-BR", "Português", "https://example.test/subtitle.ass")
 	if tr.Kind != "text" || tr.Language != "pt-BR" || len(tr.Representations) != 1 {

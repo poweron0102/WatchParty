@@ -1,6 +1,7 @@
 import uuid
 import html
-from urllib.parse import urlencode
+import ipaddress
+from urllib.parse import urlencode, urlparse
 
 from config import MEDIA_SOURCES
 from media_sources import MediaSourceError
@@ -17,8 +18,17 @@ def _is_host(sid):
 
 def _is_control_panel(sid):
     environ = sio.get_environ(sid) or {}
-    referer = environ.get("HTTP_REFERER", "")
-    return referer.rstrip("/").endswith("/host")
+    referer = urlparse(environ.get("HTTP_REFERER", ""))
+    if referer.path.rstrip("/") not in {"/host", "/host.html"}:
+        return False
+    if server_state.get("allow_remote_host_admin"):
+        return True
+    try:
+        peer_is_local = ipaddress.ip_address(environ.get("REMOTE_ADDR", "")).is_loopback
+        referer_is_local = referer.hostname == "localhost" or ipaddress.ip_address(referer.hostname or "").is_loopback
+        return peer_is_local and referer_is_local
+    except ValueError:
+        return False
 
 
 async def _stop_active_screen_share(reset_video=True):

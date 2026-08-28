@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import secrets
 from dataclasses import dataclass
-from pathlib import Path
 
 from media_sources.models import MediaResource, OpenedResource
 from .manifest import build_mpd
@@ -12,7 +11,6 @@ from .models import (DemandPriority, InvalidPlaybackResource, MaterializationTim
                      PlaybackExpired, PlaybackNotFound, PlaybackOrigin, PlaybackPaused,
                      PlaybackSelection, ResourceRequest, SegmentDemand)
 from .scheduler import MaterializationPlanner
-from .store import SegmentStore
 
 
 @dataclass
@@ -27,11 +25,10 @@ class _Active:
 
 
 class PlaybackModule:
-    def __init__(self, origins: dict[str, PlaybackOrigin], cache_path: str | Path = "cache/playback",
-                 max_segment_downloads: int = 4, wait_timeout: float = 30):
+    def __init__(self, origins: dict[str, PlaybackOrigin], max_segment_downloads: int = 4,
+                 wait_timeout: float = 30):
         self._origins = origins
-        self._store = SegmentStore(cache_path)
-        self._planner = MaterializationPlanner(self._store, max_segment_downloads)
+        self._planner = MaterializationPlanner(None, max_segment_downloads)
         self._timeout = wait_timeout
         self._active: _Active | None = None
         self._expired: set[str] = set()
@@ -78,20 +75,26 @@ class PlaybackModule:
         if resource_id == "manifest.mpd": return _opened(active.manifest, "application/dash+xml")
         try: demand = active.resources[resource_id]
         except KeyError as exc: raise InvalidPlaybackResource("recurso não declarado") from exc
-        ready = self._store.locate(active.selection.media_id, demand)
+        ready = self._locate(active, demand)
         if active.paused and not ready: raise PlaybackPaused("materialização pausada")
         try:
             artifact = ready or await asyncio.wait_for(self._planner.materialize(
                 active.selection.media_id, demand,
-                lambda: active.origin.materialize(active.selection.media_id, demand)), self._timeout)
+                lambda: active.origin.materialize(active.selection.media_id, demand),
+                publish=False), self._timeout)
         except TimeoutError as exc: raise MaterializationTimeout("tempo de materialização esgotado") from exc
         data = await asyncio.to_thread(artifact.path.read_bytes)
         mirror = self._canonical_demand(active, demand)
-        if mirror and not self._store.locate(active.selection.media_id, mirror):
+        if mirror and not self._locate(active, mirror):
             task = asyncio.create_task(self._planner.materialize(active.selection.media_id, mirror,
-                lambda: active.origin.materialize(active.selection.media_id, mirror)))
+                lambda: active.origin.materialize(active.selection.media_id, mirror),
+                publish=False))
             self._background.add(task); task.add_done_callback(self._background.discard)
         return _opened(data, artifact.content_type)
+
+    def _locate(self, active: _Active, demand: SegmentDemand):
+        locate = getattr(active.origin, "locate", None)
+        return locate(active.selection.media_id, demand) if locate else None
 
     @staticmethod
     def _canonical_demand(active: _Active, demand: SegmentDemand) -> SegmentDemand | None:

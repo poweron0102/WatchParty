@@ -14,9 +14,11 @@ class HostLayoutRegressionTests(unittest.TestCase):
         self.assertIn("Gerencie sua sessão de Watch Party", html)
         self.assertIn("bg-card p-6 rounded-lg shadow-lg", html)
         self.assertIn('id="source-select"', html)
-        self.assertNotIn('id="update-banners-btn"', html)
+        self.assertIn('id="source-extension-root"', html)
+        self.assertIn('id="remote-host-admin-toggle"', html)
         self.assertNotIn('id="video-url-field"', html)
         self.assertIn("entry_type === 'collection' ? 'folder' : 'video'", javascript)
+        self.assertIn("loadSourceExtension", javascript)
         self.assertIn(".media-item.folder img.banner", html)
         self.assertIn(".media-item.video img.banner", html)
 

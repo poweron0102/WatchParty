@@ -31,7 +31,7 @@ class FakeOrigin:
 class PlaybackTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.origin = FakeOrigin(self.temp.name)
-        self.module = PlaybackModule({"source": self.origin}, Path(self.temp.name) / "cache", wait_timeout=1)
+        self.module = PlaybackModule({"source": self.origin}, wait_timeout=1)
 
     async def asyncTearDown(self): self.temp.cleanup()
 

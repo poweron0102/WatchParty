@@ -24,6 +24,27 @@ func requestedLanguages(values []string) []string {
 	return result
 }
 
+func availableAudioLanguages(stream playbackResponse, configured []string) []string {
+	result := requestedLanguages(configured)
+	seen := map[string]bool{}
+	for _, value := range result {
+		seen[strings.ToLower(value)] = true
+	}
+	appendLanguage := func(value string) {
+		value = strings.TrimSpace(value)
+		key := strings.ToLower(value)
+		if value != "" && !seen[key] {
+			seen[key] = true
+			result = append(result, value)
+		}
+	}
+	appendLanguage(stream.AudioLocale)
+	for _, version := range stream.Versions {
+		appendLanguage(version.AudioLocale)
+	}
+	return result
+}
+
 func languageAllowed(language string, configured []string) bool {
 	if len(configured) == 0 {
 		return false

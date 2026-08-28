@@ -1,5 +1,7 @@
 import json
 import os
+import threading
+from pathlib import Path
 
 from media_sources import InvalidSourceConfiguration, build_source_registry
 from rtc_config import DEFAULT_ICE_SERVERS, normalize_ice_servers, split_ice_servers
@@ -12,7 +14,8 @@ DEFAULT_PLAYBACK = {
     "segment_wait_timeout_seconds": 30, "soft_sync_drift_seconds": 0.25,
     "hard_sync_drift_seconds": 2.0, "inactive_playback_grace_seconds": 0,
 }
-defaults = {"port": 8000, "use_cloudflare": False, "ice_servers": DEFAULT_ICE_SERVERS,
+defaults = {"port": 8000, "use_cloudflare": False, "allow_remote_host_admin": False,
+            "ice_servers": DEFAULT_ICE_SERVERS,
             "playback": DEFAULT_PLAYBACK, "sources": []}
 config = dict(defaults)
 if os.path.exists(SAVE_FILE):
@@ -31,6 +34,9 @@ else:
 PORT = int(os.getenv("WATCHPARTY_PORT", config["port"]))
 BIND_HOST = os.getenv("WATCHPARTY_BIND_HOST", "::").strip() or "::"
 USE_CLOUDFLARE = bool(config.get("use_cloudflare", False))
+if not isinstance(config.get("allow_remote_host_admin", False), bool):
+    raise RuntimeError("allow_remote_host_admin deve ser booleano")
+ALLOW_REMOTE_HOST_ADMIN = config.get("allow_remote_host_admin", False)
 PLAYBACK_CONFIG = dict(DEFAULT_PLAYBACK)
 raw_playback = config.get("playback", {})
 if not isinstance(raw_playback, dict) or set(raw_playback) - set(DEFAULT_PLAYBACK):
@@ -46,6 +52,27 @@ try:
     MEDIA_SOURCES = build_source_registry(config.get("sources"))
 except InvalidSourceConfiguration as exc:
     raise RuntimeError(f"Configuração de origens inválida em {SAVE_FILE}: {exc}") from exc
+
+_save_lock = threading.Lock()
+
+
+def persist_remote_host_admin(enabled: bool) -> None:
+    """Persist the host access policy without rewriting unrelated settings."""
+    global ALLOW_REMOTE_HOST_ADMIN
+    with _save_lock:
+        path = Path(SAVE_FILE)
+        try:
+            current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else dict(config)
+            if not isinstance(current, dict):
+                raise ValueError("configuração raiz inválida")
+            current["allow_remote_host_admin"] = bool(enabled)
+            temporary = path.with_name(f".{path.name}.tmp")
+            temporary.write_text(json.dumps(current, ensure_ascii=False, indent=4) + "\n", encoding="utf-8")
+            os.replace(temporary, path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"não foi possível persistir {SAVE_FILE}: {exc}") from exc
+        config["allow_remote_host_admin"] = bool(enabled)
+        ALLOW_REMOTE_HOST_ADMIN = bool(enabled)
 
 TURN_HOST = os.getenv("TURN_HOST", "").strip()
 TURN_REALM = os.getenv("TURN_REALM", TURN_HOST or "watchparty").strip()
