@@ -5,7 +5,12 @@
     position: relative;
     min-width: 0;
     min-height: 0;
-    transition: flex 0.3s ease-in-out;
+    transition: flex 0.3s ease-in-out, flex-basis 0.3s ease-in-out, width 0.3s ease-in-out;
+}
+
+#chat-container.collapsed {
+    flex: 0 0 0;
+    width: 0;
 }
 
 #sidebar {
@@ -13,6 +18,7 @@
     min-width: 300px;
     max-width: 350px;
     min-height: 0;
+    overflow: hidden;
     border-left: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
@@ -110,14 +116,18 @@
     border: 1px solid #ffc107;
 }
 
-#chat-box {padding: 15px;}
-#chat-box { flex: 1; overflow-y: auto; }
+#chat-box {
+    flex: 1;
+    min-height: 0;
+    padding: 15px;
+    overflow-y: auto;
+}
 #chat-box::-webkit-scrollbar { width: 2px; }
 #chat-box::-webkit-scrollbar-track { background: var(--bg-secondary); }
 #chat-box::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 1px; }
 #chat-box::-webkit-scrollbar-thumb:hover { background: #555; }
 
-#chat-input-area { display: flex; border-top: 1px solid var(--border-color); padding: 10px; background-color: var(--bg-secondary); }
+#chat-input-area { display: flex; flex-shrink: 0; border-top: 1px solid var(--border-color); padding: 10px; background-color: var(--bg-secondary); }
 #chat-input { flex: 1; border: 1px solid var(--border-color); background-color: var(--bg-tertiary); color: var(--text-primary); padding: 10px; border-radius: 5px; margin-right: 10px; }
 #chat-input:focus { outline: none; border-color: var(--accent-color); }
 #send-btn { border: none; background: var(--accent-color); color: white; padding: 0 15px; border-radius: 5px; cursor: pointer; transition: background-color 0.2s ease; }
@@ -238,8 +248,15 @@
 
 @media (max-width: 900px) {
     #chat-container {
-        flex: 0 0 min(42vh, 360px);
+        flex: 0 1 min(42vh, 360px);
         flex-basis: min(42dvh, 360px);
+        width: 100%;
+        min-height: 48px;
+    }
+
+    #chat-container.collapsed {
+        flex: 0 0 48px;
+        flex-basis: 48px;
         width: 100%;
         min-height: 48px;
     }

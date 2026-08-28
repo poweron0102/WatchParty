@@ -19,6 +19,8 @@ body {
     font-family: 'Inter', sans-serif;
     margin: 0;
     display: flex;
+    height: 100vh;
+    height: 100dvh;
     min-height: 100vh;
     min-height: 100dvh;
     background-color: var(--bg-primary);
@@ -289,7 +291,7 @@ video {
 
     #video-container {
         flex: 1 1 auto;
-        min-height: 220px;
+        min-height: 0;
     }
 
     #notification-container {
@@ -317,6 +319,6 @@ video {
     }
 
     #video-container {
-        min-height: 180px;
+        min-height: 0;
     }
 }
