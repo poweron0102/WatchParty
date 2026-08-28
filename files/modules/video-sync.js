@@ -4,14 +4,15 @@ import { isScreenShareVideo } from './screen-share.js';
 export const syncState = { isSyncing: false, syncInterval: null, syncRequestTime: 0, currentVideo: null, loadToken: 0 };
 export async function loadMediaTracks(selection) {
     const response = await fetch('/api/playback/select', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(selection) });
-    if (!response.ok) throw new Error('Não foi possível carregar a mídia.');
-    return response.json();
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || 'Não foi possível carregar a mídia.');
+    return data;
 }
 export function setupDubControls() {}
 export function setupDubListeners() {}
 function clearMedia(player) { player.muted = false; player.unload(); }
 async function applySelection(selection, player) {
-    const token = ++syncState.loadToken; clearMedia(player);
+    const token = ++syncState.loadToken; player.muted = false; await player.unload();
     const descriptor = await loadMediaTracks(selection); if (token !== syncState.loadToken) return false;
     await player.load(descriptor.manifest.url); return token === syncState.loadToken;
 }

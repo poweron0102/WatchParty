@@ -31,11 +31,13 @@ O playback usa um manifesto MPEG-DASH local e Shaka Player 5.2.0 hospedado pelo 
 WatchParty. A origem `directory` cria derivados quando FFmpeg/FFprobe estão disponíveis; sem
 eles, o catálogo continua navegável e anuncia playback indisponível.
 
-Para uma origem privada `crunchyroll`, copie a seção correspondente de
-`docs/crunchyroll-source-implementation-plan.md` para `sources`, informe o cookie `etp_rt`
-somente em `save.json` e configure `worker_path` e `widevine_device_path`. Esses arquivos são
-segredos locais e estão ignorados pelo Git; tokens, URLs de playback, licenças e chaves nunca
-são persistidos pelo processo Python.
+Para uma origem privada `crunchyroll`, habilite o exemplo de `save.example.json`, informe o
+cookie `etp_rt` somente em `save.json` e mantenha `worker_path` como
+`bin\\crunchyroll-worker.exe`. Para seu dispositivo Widevine, configure simultaneamente
+`client_id_path` e `private_key_path`; alternativamente, configure somente
+`widevine_device_path` para um arquivo `.wvd`. Instruções de build e segurança ficam em
+`tools/crunchyroll-worker/README.md`. Esses arquivos são segredos locais e estão ignorados
+pelo Git; tokens, URLs de playback, licenças e chaves nunca são persistidos pelo processo Python.
 
 Vídeos aceitos: MP4, MKV, WebM e AVI. Sidecars ficam junto ao vídeo nas convenções `.subs/<nome>.<idioma>.vtt`, `.dubs/<nome>.<idioma>.mp3|aac|ogg` e `.previews/<nome>_banner.png`. Coleções podem usar `.previews/banner.png`.
 

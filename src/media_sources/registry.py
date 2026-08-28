@@ -63,12 +63,22 @@ def _languages(value, name, require_explicit=False):
 def _crunchyroll_factory(options: dict[str, Any]) -> MediaSource:
     allowed = {"cache_path", "etp_rt", "locale", "audio_languages", "subtitle_languages", "video_quality",
                "audio_quality", "metadata_ttl_hours", "finalization_idle_minutes", "worker_idle_seconds",
-               "max_segment_downloads", "max_playback_sessions", "worker_path", "ffmpeg_path", "widevine_device_path"}
-    if set(options) != allowed:
+               "max_segment_downloads", "max_playback_sessions", "worker_path", "ffmpeg_path", "widevine_device_path",
+               "client_id_path", "private_key_path"}
+    required = allowed - {"widevine_device_path", "client_id_path", "private_key_path"}
+    if set(options) - allowed or not required.issubset(options):
         raise InvalidSourceConfiguration("opções ausentes ou desconhecidas para crunchyroll")
-    for field in ("cache_path", "etp_rt", "locale", "video_quality", "audio_quality", "worker_path", "ffmpeg_path", "widevine_device_path"):
+    for field in ("cache_path", "etp_rt", "locale", "video_quality", "audio_quality", "worker_path", "ffmpeg_path"):
         if not isinstance(options.get(field), str) or not options[field].strip():
             raise InvalidSourceConfiguration(f"{field} é obrigatório")
+    raw_device = options.get("widevine_device_path")
+    raw_client = options.get("client_id_path")
+    raw_key = options.get("private_key_path")
+    has_wvd = isinstance(raw_device, str) and bool(raw_device.strip())
+    has_raw_device = all(isinstance(value, str) and bool(value.strip()) for value in (raw_client, raw_key))
+    has_partial_raw = any(value is not None for value in (raw_client, raw_key)) and not has_raw_device
+    if has_partial_raw or has_wvd == has_raw_device:
+        raise InvalidSourceConfiguration("configure widevine_device_path ou o par client_id_path/private_key_path")
     _languages(options["audio_languages"], "audio_languages", True)
     _languages(options["subtitle_languages"], "subtitle_languages")
     for field in ("metadata_ttl_hours", "finalization_idle_minutes", "worker_idle_seconds", "max_segment_downloads", "max_playback_sessions"):

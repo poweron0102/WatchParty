@@ -4,6 +4,8 @@ import asyncio
 import hashlib
 import json
 import os
+import re
+import sys
 import uuid
 from pathlib import Path
 
@@ -15,19 +17,29 @@ from .errors import SourceUnavailable
 class CrunchyrollWorkerClient:
     """Versioned JSON-Lines client. Secrets are sent only through stdin."""
     VERSION = 1
+    STREAM_LIMIT = 16 * 1024 * 1024
 
     def __init__(self, worker_path, cookie, options):
         self.path, self.cookie, self.options = str(worker_path), cookie, options
         self._process = None; self._pending = {}; self._reader = None; self._write_lock = asyncio.Lock()
+        self._start_lock = asyncio.Lock()
+
+    def _safe_diagnostic(self, message):
+        safe = str(message or "falha sem detalhes")
+        for value in (self.cookie, self.options.get("cache_path"), self.options.get("client_id_path"),
+                      self.options.get("private_key_path"), self.options.get("widevine_device_path")):
+            if value: safe = safe.replace(str(value), "<redacted>")
+        return re.sub(r"https?://\S+", "<url>", safe)[:240]
 
     async def _start(self):
-        if self._process and self._process.returncode is None: return
-        try:
-            self._process = await asyncio.create_subprocess_exec(self.path, stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-        except OSError as exc: raise SourceUnavailable("worker de playback indisponível") from exc
-        self._reader = asyncio.create_task(self._read())
-        await self.command("activate", {"etp_rt": self.cookie, "options": self.options})
+        async with self._start_lock:
+            if self._process and self._process.returncode is None: return
+            try:
+                self._process = await asyncio.create_subprocess_exec(self.path, stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, limit=self.STREAM_LIMIT)
+            except OSError as exc: raise SourceUnavailable("worker de playback indisponível") from exc
+            self._reader = asyncio.create_task(self._read())
+            await self.command("activate", {"etp_rt": self.cookie, "options": self.options})
 
     async def _read(self):
         while self._process and (line := await self._process.stdout.readline()):
@@ -35,8 +47,15 @@ class CrunchyrollWorkerClient:
             except ValueError: continue
             request_id = message.get("request_id"); future = self._pending.get(request_id)
             if not future: continue
-            if message.get("event") == "failed": future.set_exception(SourceUnavailable("worker não pôde materializar o recurso"))
+            if message.get("event") == "failed":
+                code = message.get("code", "worker_failed")
+                print(f"Crunchyroll worker [{code}]: {self._safe_diagnostic(message.get('message'))}", file=sys.stderr)
+                future.set_exception(SourceUnavailable("worker não pôde materializar o recurso"))
+            elif message.get("event") == "stage":
+                print(f"Crunchyroll worker: {message.get('stage', 'working')}", file=sys.stderr)
             elif message.get("event") in ("completed", "asset", "released"): future.set_result(message)
+        for future in tuple(self._pending.values()):
+            if not future.done(): future.set_exception(SourceUnavailable("worker de playback foi encerrado"))
 
     async def command(self, name, payload):
         if name != "activate": await self._start()
@@ -54,7 +73,7 @@ class CrunchyrollWorkerClient:
         for raw_track in data["tracks"]:
             reps = []
             for raw_rep in raw_track["representations"]:
-                segments = tuple(OriginSegment(str(s["identity"]), float(s["start"]), float(s["duration"])) for s in raw_rep["segments"])
+                segments = tuple(OriginSegment(str(s["identity"]), float(s["start"]), float(s["duration"])) for s in (raw_rep.get("segments") or ()))
                 reps.append(OriginRepresentation(str(raw_rep["id"]), int(raw_rep["bandwidth"]), raw_rep["codecs"], raw_rep["mime_type"], str(raw_rep["initialization"]), segments, raw_rep.get("width"), raw_rep.get("height")))
             tracks.append(OriginTrack(str(raw_track["id"]), raw_track["kind"], tuple(reps), raw_track.get("language"), raw_track.get("label"), raw_track.get("default", False)))
         return OriginPresentation(media_id, data["title"], float(data["duration"]), tuple(tracks), data["revision_seed"], canonical_video_representation=data.get("canonical_video_representation"))

@@ -33,11 +33,17 @@ class CrunchyrollSource:
 
     async def inspect(self, media_id):
         if not self._worker: raise SourceUnavailable("worker de playback indisponível")
-        return await self._worker.inspect(media_id)
+        return await self._worker.inspect(self._remote_id(media_id))
 
     async def materialize(self, media_id, demand):
         if not self._worker: raise SourceUnavailable("worker de playback indisponível")
-        return await self._worker.materialize(media_id, demand)
+        return await self._worker.materialize(self._remote_id(media_id), demand)
+
+    @staticmethod
+    def _remote_id(local_id: str) -> str:
+        prefix, separator, remote_id = local_id.partition(":")
+        if separator and prefix in {"series", "season", "episode", "movie"}: return remote_id
+        return local_id
 
     def _cache_file(self, key: str) -> Path:
         import hashlib
@@ -58,25 +64,48 @@ class CrunchyrollSource:
             if stale: return stale["payload"]
             raise
 
-    def _entries(self, payload) -> tuple[CatalogEntry, ...]:
+    @staticmethod
+    def _image_url(images) -> str | None:
+        if isinstance(images, dict):
+            for key in ("poster_tall", "thumbnail", "poster_wide", "promo_image"):
+                found = CrunchyrollSource._image_url(images.get(key))
+                if found: return found
+            for value in images.values():
+                found = CrunchyrollSource._image_url(value)
+                if found: return found
+        elif isinstance(images, list):
+            for value in reversed(images):
+                found = CrunchyrollSource._image_url(value)
+                if found: return found
+        return images.get("source") if isinstance(images, dict) and isinstance(images.get("source"), str) else None
+
+    @staticmethod
+    def _payload_items(payload):
         results = payload.get("data") or payload.get("items") or []
-        entries = []
+        flattened = []
         for raw in results:
+            if isinstance(raw, dict) and not (raw.get("id") or raw.get("series_id")) and isinstance(raw.get("items"), list):
+                flattened.extend(item for item in raw["items"] if isinstance(item, dict))
+            elif isinstance(raw, dict): flattened.append(raw)
+        return flattened
+
+    def _entries(self, payload, expected_type=None) -> tuple[CatalogEntry, ...]:
+        entries = []
+        for raw in self._payload_items(payload):
             identifier = raw.get("id") or raw.get("series_id")
             title = raw.get("title") or raw.get("name")
             if not identifier or not title: continue
-            is_playable = raw.get("type") in ("movie", "episode") or raw.get("episode_number") is not None
-            images = raw.get("images") or {}; image_url = None
-            for group in images.values() if isinstance(images, dict) else ():
-                if isinstance(group, list) and group:
-                    candidate = group[-1]
-                    if isinstance(candidate, dict): image_url = candidate.get("source"); break
+            kind = expected_type or raw.get("type") or ("episode" if raw.get("episode_number") is not None else "series")
+            is_playable = kind in ("movie", "episode") or raw.get("episode_number") is not None
+            local_kind = "episode" if is_playable and kind != "movie" else kind
+            if local_kind not in {"series", "season", "episode", "movie"}: local_kind = "series"
+            image_url = self._image_url(raw.get("images") or raw.get("localized_images") or {})
             image = None
             if image_url:
                 opaque = hashlib.sha256(image_url.encode()).hexdigest()
                 self._image_urls[opaque] = image_url
                 image = MediaResource(f"image:{opaque}", "image/jpeg")
-            entries.append(CatalogEntry(str(identifier), str(title), EntryType.PLAYABLE if is_playable else EntryType.COLLECTION,
+            entries.append(CatalogEntry(f"{local_kind}:{identifier}", str(title), EntryType.PLAYABLE if is_playable else EntryType.COLLECTION,
                                         "video" if is_playable else None, image))
         return tuple(entries)
 
@@ -91,9 +120,21 @@ class CrunchyrollSource:
             elif kind == "az": params["sort_by"] = "alphabetical"
             elif kind == "popular": params["sort_by"] = "popularity"
             payload = await self._cached(f"browse:{kind}:{offset}", lambda: self._api.get("/content/v2/discover/browse", params))
-        else:
-            payload = await self._cached(f"object:{parent_id}", lambda: self._api.get(f"/content/v2/cms/objects/{quote(parent_id)}"))
-        items = self._entries(payload); return CatalogPage(items, str(offset + len(items)) if len(items) == 50 else None)
+            items = self._entries(payload)
+        elif parent_id.startswith("series:"):
+            remote_id = self._remote_id(parent_id)
+            params = {"force_locale": "", "preferred_audio_language": "ja-JP"}
+            payload = await self._cached(f"seasons:{remote_id}", lambda: self._api.get(
+                f"/content/v2/cms/series/{quote(remote_id)}/seasons", params))
+            items = self._entries(payload, "season")
+        elif parent_id.startswith("season:"):
+            remote_id = self._remote_id(parent_id)
+            params = {"preferred_audio_language": "ja-JP"}
+            payload = await self._cached(f"episodes:{remote_id}", lambda: self._api.get(
+                f"/content/v2/cms/seasons/{quote(remote_id)}/episodes", params))
+            items = self._entries(payload, "episode")
+        else: raise CollectionNotFound("coleção não encontrada")
+        return CatalogPage(items, str(offset + len(items)) if len(items) == 50 else None)
 
     async def search(self, query, cursor=None):
         offset = int(cursor or 0); q = query.strip()
@@ -102,7 +143,8 @@ class CrunchyrollSource:
         items = self._entries(payload); return CatalogPage(items, str(offset + len(items)) if len(items) == 50 else None)
 
     async def get_item(self, media_id):
-        payload = await self._cached(f"item:{media_id}", lambda: self._api.get(f"/content/v2/cms/objects/{quote(media_id)}"))
+        remote_id = self._remote_id(media_id)
+        payload = await self._cached(f"item:{remote_id}", lambda: self._api.get(f"/content/v2/cms/objects/{quote(remote_id)}"))
         entries = self._entries(payload)
         if not entries or entries[0].entry_type != EntryType.PLAYABLE: raise MediaItemNotFound("item não encontrado")
         entry = entries[0]

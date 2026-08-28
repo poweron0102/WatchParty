@@ -21,7 +21,17 @@ def build_mpd(presentation: OriginPresentation, resource_ids: dict[tuple[str, st
         for rep in track.representations:
             extra = f' width="{rep.width}" height="{rep.height}"' if rep.width and rep.height else ""
             parts.append(f'<Representation id="{html.escape(rep.id)}" bandwidth="{rep.bandwidth}" codecs="{html.escape(rep.codecs)}" mimeType="{html.escape(rep.mime_type)}"{extra}>')
+            if track.kind == "text":
+                subtitle_id = resource_ids[(track.id, rep.id, rep.initialization)]
+                parts.extend([f'<BaseURL>{html.escape(subtitle_id)}</BaseURL>', '</Representation>'])
+                continue
             parts.append('<SegmentList timescale="1000">')
+            parts.append('<SegmentTimeline>')
+            for segment in rep.segments:
+                start = max(0, round(segment.start * 1000))
+                duration = max(1, round(segment.duration * 1000))
+                parts.append(f'<S t="{start}" d="{duration}"/>')
+            parts.append('</SegmentTimeline>')
             init_id = resource_ids[(track.id, rep.id, rep.initialization)]
             parts.append(f'<Initialization sourceURL="{init_id}"/>')
             for segment in rep.segments:

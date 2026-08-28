@@ -1,6 +1,7 @@
 import hashlib
 import os
 import secrets
+import sys
 from dataclasses import asdict
 
 import fastapi
@@ -141,6 +142,7 @@ async def select_playback(selection: dict):
     except (KeyError, PlaybackNotFound):
         raise fastapi.HTTPException(404, "Playback indisponível.")
     except Exception as exc:
+        print(f"Falha ao selecionar playback: {type(exc).__name__}: {exc}", file=sys.stderr)
         raise _media_error(exc) from exc
     data = asdict(descriptor)
     data["manifest"]["url"] = f"/playback/{descriptor.playback_id}/asset/manifest.mpd"

@@ -10,5 +10,9 @@ Its Apache-2.0 license is preserved in that directory.
 The worker protocol and separation of catalog, playback sessions, MPD inspection and DRM were
 designed with reference to the MIT-licensed `crunchyroll-downloader` repository named in the
 implementation plan. No source file from that repository is copied into this project in the
-current implementation. Any future Go worker code derived from it must retain its MIT license
-and attribution.
+current implementation. The in-tree worker was written specifically for WatchParty from that
+behavioral reference; its reference notice is retained in
+`tools/crunchyroll-worker/LICENSE.reference.txt`.
+
+The worker links to `github.com/iyear/gowidevine` and `github.com/Eyevinn/mp4ff` through Go
+modules. Their license metadata is distributed with their respective source modules.

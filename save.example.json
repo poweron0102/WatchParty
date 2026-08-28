@@ -21,6 +21,30 @@
                 "transcode_profile": "chrome-h264-aac",
                 "hardware_acceleration": "auto"
             }
+        },
+        {
+            "id": "crunchyroll",
+            "type": "crunchyroll",
+            "label": "Crunchyroll",
+            "enabled": false,
+            "options": {
+                "cache_path": "D:\\Series e Filmes\\CrunchyrollCache",
+                "etp_rt": "COLE_O_COOKIE_ETP_RT_AQUI",
+                "locale": "pt-BR",
+                "audio_languages": ["pt-BR", "ja-JP"],
+                "subtitle_languages": ["pt-BR"],
+                "video_quality": "1080p",
+                "audio_quality": "192k",
+                "metadata_ttl_hours": 24,
+                "finalization_idle_minutes": 5,
+                "worker_idle_seconds": 120,
+                "max_segment_downloads": 4,
+                "max_playback_sessions": 2,
+                "worker_path": "bin\\crunchyroll-worker.exe",
+                "ffmpeg_path": "ffmpeg.exe",
+                "client_id_path": "secrets\\client_id.bin",
+                "private_key_path": "secrets\\private_key.pem"
+            }
         }
     ]
 }

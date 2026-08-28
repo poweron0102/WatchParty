@@ -37,29 +37,33 @@ class PlaybackModule:
         self._expired: set[str] = set()
         self._background: set[asyncio.Task] = set()
         self._lock = asyncio.Lock()
+        self._selection_lock = asyncio.Lock()
 
     async def select(self, selection: PlaybackSelection) -> PlaybackDescriptor:
-        try: origin = self._origins[selection.source_id]
-        except KeyError as exc: raise PlaybackNotFound("origem não encontrada") from exc
-        presentation = await origin.inspect(selection.media_id)
-        revision = hashlib.sha256((selection.source_id + "\0" + presentation.revision_seed).encode()).hexdigest()[:24]
-        async with self._lock:
-            if self._active and self._active.selection == selection and self._active.descriptor.revision == revision:
+        async with self._selection_lock:
+            if self._active and self._active.selection == selection:
                 return self._active.descriptor
-            if self._active: self._expired.add(self._active.descriptor.playback_id)
-            playback_id = secrets.token_urlsafe(18)
-            resources, urls = {}, {}
-            for track in presentation.tracks:
-                for rep in track.representations:
-                    for identity in (rep.initialization, *(segment.identity for segment in rep.segments)):
-                        opaque = secrets.token_urlsafe(18)
-                        resources[opaque] = SegmentDemand(track.id, rep.id, identity)
-                        urls[(track.id, rep.id, identity)] = f'/playback/{playback_id}/asset/{opaque}'
-            manifest = build_mpd(presentation, urls)
-            descriptor = PlaybackDescriptor(playback_id, revision,
-                MediaResource("manifest.mpd", "application/dash+xml", len(manifest)), presentation.title, presentation.image)
-            self._active = _Active(descriptor, selection, origin, presentation, manifest, resources)
-            return descriptor
+            try: origin = self._origins[selection.source_id]
+            except KeyError as exc: raise PlaybackNotFound("origem não encontrada") from exc
+            presentation = await origin.inspect(selection.media_id)
+            revision = hashlib.sha256((selection.source_id + "\0" + presentation.revision_seed).encode()).hexdigest()[:24]
+            async with self._lock:
+                if self._active and self._active.selection == selection and self._active.descriptor.revision == revision:
+                    return self._active.descriptor
+                if self._active: self._expired.add(self._active.descriptor.playback_id)
+                playback_id = secrets.token_urlsafe(18)
+                resources, urls = {}, {}
+                for track in presentation.tracks:
+                    for rep in track.representations:
+                        for identity in (rep.initialization, *(segment.identity for segment in rep.segments)):
+                            opaque = secrets.token_urlsafe(18)
+                            resources[opaque] = SegmentDemand(track.id, rep.id, identity)
+                            urls[(track.id, rep.id, identity)] = f'/playback/{playback_id}/asset/{opaque}'
+                manifest = build_mpd(presentation, urls)
+                descriptor = PlaybackDescriptor(playback_id, revision,
+                    MediaResource("manifest.mpd", "application/dash+xml", len(manifest)), presentation.title, presentation.image)
+                self._active = _Active(descriptor, selection, origin, presentation, manifest, resources)
+                return descriptor
 
     async def set_download_paused(self, playback_id: str, paused: bool) -> None:
         active = self._require(playback_id); active.paused = paused

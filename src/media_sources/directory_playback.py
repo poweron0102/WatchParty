@@ -51,7 +51,7 @@ class DirectoryPlaybackAdapter:
 
     async def materialize(self, media_id, demand: SegmentDemand):
         path = self._path(media_id); start = 0 if demand.segment_identity == "init" else int(demand.segment_identity) * 10
-        duration = 0.05 if demand.segment_identity == "init" else 10
+        duration = 10
         handle, name = tempfile.mkstemp(prefix="watchparty-artifact-", suffix=".mp4"); os.close(handle); Path(name).unlink(missing_ok=True)
         output = Path(name); mapping = "0:v:0" if demand.track_id.startswith("video") else "0:a:0"
         command = [self.ffmpeg, "-v", "error", "-ss", str(start), "-i", str(path), "-t", str(duration), "-map", mapping]
@@ -59,5 +59,32 @@ class DirectoryPlaybackAdapter:
         command += ["-movflags", "+frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "-y", str(output)]
         try: await asyncio.to_thread(subprocess.run, command, capture_output=True, timeout=60, check=True)
         except Exception as exc: raise SourceUnavailable("falha ao materializar segmento local") from exc
-        data = output.read_bytes(); digest = hashlib.sha256(data).hexdigest()
+        complete = output.read_bytes()
+        init, media = _split_fragmented_mp4(complete)
+        data = init if demand.segment_identity == "init" else media
+        if not data: raise SourceUnavailable("FFmpeg produziu um fragmento local vazio")
+        output.write_bytes(data); digest = hashlib.sha256(data).hexdigest()
         return SegmentArtifact(output, "video/mp4" if mapping.startswith("0:v") else "audio/mp4", len(data), digest)
+
+
+def _split_fragmented_mp4(data: bytes) -> tuple[bytes, bytes]:
+    """Split a single-fragment MP4 into its init and media portions."""
+    offset = 0
+    media_offset = None
+    while offset + 8 <= len(data):
+        size = int.from_bytes(data[offset:offset + 4], "big")
+        kind = data[offset + 4:offset + 8]
+        header = 8
+        if size == 1:
+            if offset + 16 > len(data): break
+            size = int.from_bytes(data[offset + 8:offset + 16], "big"); header = 16
+        elif size == 0:
+            size = len(data) - offset
+        if size < header or offset + size > len(data): break
+        if kind in (b"moof", b"styp", b"sidx"):
+            media_offset = offset
+            break
+        offset += size
+    if media_offset is None:
+        raise SourceUnavailable("FFmpeg não produziu fMP4 fragmentado")
+    return data[:media_offset], data[media_offset:]

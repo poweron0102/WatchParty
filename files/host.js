@@ -40,7 +40,7 @@ function renderBreadcrumbs() {
 }
 async function navigate(parentId = null, title = null, push = true) {
     if (!sourceId) return;
-    if (push && parentId !== null) trail.push({ id: parentId, title });
+    if (push && parentId !== null && trail.at(-1)?.id !== parentId) trail.push({ id: parentId, title });
     renderBreadcrumbs(); folders.innerHTML = '<p>Carregando…</p>'; videos.innerHTML = '';
     const params = new URLSearchParams({ source_id: sourceId }); if (parentId !== null) params.set('parent_id', parentId);
     try {

@@ -37,7 +37,9 @@ dist/
 *.tgz
 /package/
 /bin/*.exe
+**/.gocache/
 *.wvd
+*.bin
 
 # Editors and IDEs (keep these rules centralized for every Git client)
 .idea/

@@ -10,6 +10,10 @@ import { PlayerController } from './modules/player-controller.js';
 
 const socket = io();
 const player = new PlayerController(document.getElementById('player'));
+player.media.addEventListener('shaka-error', event => {
+    const code = event.detail?.code ? ` (código ${event.detail.code})` : '';
+    showNotification(`Falha no player${code}.`, 'error');
+});
 const dubPlayer = { pause(){}, play(){ return Promise.resolve(); }, currentTime: 0 };
 const statusIndicator = document.getElementById('status-indicator');
 const audioControlsContainer = document.getElementById('audio-controls-container');
