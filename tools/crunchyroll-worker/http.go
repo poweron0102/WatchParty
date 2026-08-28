@@ -140,6 +140,12 @@ type playbackResponse struct {
 	Token       string                      `json:"token"`
 	AudioLocale string                      `json:"audio_locale"`
 	Subtitles   map[string]playbackSubtitle `json:"subtitles"`
+	Versions    []playbackVersion           `json:"versions"`
+}
+
+type playbackVersion struct {
+	GUID        string `json:"guid"`
+	AudioLocale string `json:"audio_locale"`
 }
 
 type playbackSubtitle struct {
@@ -159,6 +165,15 @@ func (a *apiClient) openPlayback(id, language string) (playbackResponse, error) 
 		err = json.Unmarshal(b, &result)
 	}
 	return result, err
+}
+
+func playbackIDForLanguage(fallback, language string, stream playbackResponse) string {
+	for _, version := range stream.Versions {
+		if version.GUID != "" && strings.EqualFold(version.AudioLocale, language) {
+			return version.GUID
+		}
+	}
+	return fallback
 }
 
 func (a *apiClient) release(id, token string) {

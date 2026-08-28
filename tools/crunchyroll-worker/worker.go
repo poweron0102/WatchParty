@@ -115,11 +115,21 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 	seenAudio := map[string]bool{}
 	seenSubtitle := map[string]bool{}
 	languages := requestedLanguages(w.opts.AudioLanguages)
+	discovery, err := w.api.openPlayback(mediaKey, "")
+	if err != nil {
+		return presentation{}, err
+	}
+	w.api.release(mediaKey, discovery.Token)
 	if len(languages) == 0 {
 		languages = []string{""}
 	}
 	for index, requested := range languages {
-		stream, err := w.api.openPlayback(mediaKey, requested)
+		playbackID := playbackIDForLanguage(mediaKey, requested, discovery)
+		queryLanguage := ""
+		if playbackID == mediaKey {
+			queryLanguage = requested
+		}
+		stream, err := w.api.openPlayback(playbackID, queryLanguage)
 		if err != nil {
 			if index == 0 {
 				return presentation{}, err
@@ -141,7 +151,7 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 		if language == "" {
 			language = requested
 		}
-		versionID := fmt.Sprintf("%s@%s", mediaKey, language)
+		versionID := fmt.Sprintf("%s@%s", playbackID, language)
 		parsed, pssh, err := parseMPD(raw, stream.URL, versionID, language)
 		if err != nil {
 			w.api.release(mediaKey, stream.Token)
@@ -180,9 +190,9 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 			p.Tracks = append(p.Tracks, subtitleTrack(mediaKey, locale, subtitle.Language, subtitle.URL))
 		}
 		if keepSession {
-			versions[versionID] = &versionState{contentID: mediaKey, language: language, stream: stream, pssh: pssh}
+			versions[versionID] = &versionState{contentID: playbackID, language: language, stream: stream, pssh: pssh}
 		} else {
-			w.api.release(mediaKey, stream.Token)
+			w.api.release(playbackID, stream.Token)
 		}
 		if p.Duration == 0 {
 			p.Duration = parsed.Duration

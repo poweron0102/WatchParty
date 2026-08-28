@@ -62,3 +62,10 @@ func TestASSSubtitleIsConvertedToWebVTT(t *testing.T) {
 		t.Fatalf("unexpected VTT: %q", got)
 	}
 }
+
+func TestPlaybackIDUsesTheVersionMatchingRequestedAudio(t *testing.T) {
+	stream := playbackResponse{Versions: []playbackVersion{{GUID: "japanese-guid", AudioLocale: "ja-JP"}, {GUID: "portuguese-guid", AudioLocale: "pt-BR"}}}
+	if got := playbackIDForLanguage("episode-guid", "pt-BR", stream); got != "portuguese-guid" {
+		t.Fatalf("playback id=%q", got)
+	}
+}
