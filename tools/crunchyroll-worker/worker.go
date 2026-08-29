@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -247,7 +248,7 @@ func (w *worker) expandSegmentBases(p *presentation) error {
 			if err != nil {
 				return err
 			}
-			data, _, err := w.api.request("GET", r.initURL, nil, map[string]string{"Range": fmt.Sprintf("bytes=%d-%d", is, ie), "Origin": "https://static.crunchyroll.com", "Referer": "https://static.crunchyroll.com/"})
+			data, err := w.requestRange(r.initURL, indexRange)
 			if err != nil {
 				return err
 			}
@@ -345,30 +346,25 @@ func (w *worker) materialize(mediaKey string, d demand, stage func(string)) (str
 	if err != nil {
 		return "", "", "", err
 	}
-	stage("download_init")
-	init, err := w.requestRange(found.initURL, found.initRange)
+	init, err := w.initialization(found, version, stage)
 	if err != nil {
 		return "", "", "", err
 	}
 	var clear []byte
 	if d.SegmentIdentity == "init" {
 		stage("download_bootstrap_media")
-		var first string
-		for _, target := range found.mediaURLs {
-			first = target
-			break
-		}
-		if first == "" {
+		first, firstRange, ok := firstMedia(found)
+		if !ok {
 			return "", "", "", errors.New("representation has no media segments")
 		}
-		media, e := w.requestRange(first, found.mediaRanges[d.SegmentIdentity])
+		media, e := w.requestRange(first, firstRange)
 		if e != nil {
 			return "", "", "", e
 		}
 		stage("decrypt")
 		clear, _, e = decryptFragment(init, media, version.keys)
 		if e != nil {
-			return "", "", "", e
+			return "", "", "", decryptError(found, d, init, media, e)
 		}
 	} else {
 		stage("download_media")
@@ -383,34 +379,106 @@ func (w *worker) materialize(mediaKey string, d demand, stage func(string)) (str
 		stage("decrypt")
 		_, clear, e = decryptFragment(init, media, version.keys)
 		if e != nil {
-			return "", "", "", e
+			return "", "", "", decryptError(found, d, init, media, e)
 		}
 	}
 	stage("publish")
 	return w.publish(clear, found.MimeType, "segment")
 }
 
+func (w *worker) initialization(found *representation, version *versionState, stage func(string)) ([]byte, error) {
+	version.initMu.Lock()
+	defer version.initMu.Unlock()
+	if init := version.inits[found.ID]; init != nil {
+		stage("reuse_init")
+		return init, nil
+	}
+	stage("download_init")
+	init, err := w.requestRange(found.initURL, found.initRange)
+	if err != nil {
+		return nil, err
+	}
+	if version.inits == nil {
+		version.inits = map[string][]byte{}
+	}
+	version.inits[found.ID] = init
+	return init, nil
+}
+
+func firstMedia(found *representation) (string, string, bool) {
+	for _, segment := range found.Segments {
+		if target := found.mediaURLs[segment.Identity]; target != "" {
+			return target, found.mediaRanges[segment.Identity], true
+		}
+	}
+	return "", "", false
+}
+
+func decryptError(found *representation, d demand, init, media []byte, err error) error {
+	return fmt.Errorf("decrypt failed track=%s representation=%s segment=%s init_bytes=%d media_bytes=%d media_range=%s: %w",
+		d.TrackID, found.ID, d.SegmentIdentity, len(init), len(media), found.mediaRanges[d.SegmentIdentity], err)
+}
+
 func (w *worker) requestRange(target, value string) ([]byte, error) {
 	headers := map[string]string{"Origin": "https://static.crunchyroll.com", "Referer": "https://static.crunchyroll.com/"}
-	if value != "" {
-		headers["Range"] = "bytes=" + value
+	if value == "" {
+		data, _, err := w.api.request("GET", target, nil, headers)
+		return data, err
 	}
-	data, responseHeaders, err := w.api.request("GET", target, nil, headers)
-	if err == nil && value != "" {
-		start, end, rangeErr := parseByteRange(value)
-		expected := end - start + 1
-		contentRange := responseHeaders.Get("Content-Range")
-		if rangeErr != nil {
-			return nil, rangeErr
+	start, end, err := parseByteRange(value)
+	if err != nil {
+		return nil, err
+	}
+	expected := end - start + 1
+	headers["Range"] = "bytes=" + value
+	const attempts = 3
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		data, responseHeaders, requestErr := w.api.request("GET", target, nil, headers)
+		if requestErr == nil {
+			if validationErr := validateRangeResponse(value, expected, data, responseHeaders); validationErr == nil {
+				return data, nil
+			} else {
+				lastErr = validationErr
+			}
+		} else {
+			lastErr = requestErr
 		}
-		if contentRange == "" {
-			return nil, fmt.Errorf("CDN ignored byte range %s (missing Content-Range)", value)
-		}
-		if int64(len(data)) != expected {
-			return nil, fmt.Errorf("byte range %s returned %d bytes, expected %d", value, len(data), expected)
+		if attempt+1 < attempts {
+			time.Sleep(time.Duration(attempt+1) * 250 * time.Millisecond)
 		}
 	}
-	return data, err
+	return nil, fmt.Errorf("byte range %s failed after %d attempts: %w", value, attempts, lastErr)
+}
+
+func validateRangeResponse(value string, expected int64, data []byte, headers http.Header) error {
+	contentRange := strings.TrimSpace(headers.Get("Content-Range"))
+	if contentRange == "" {
+		return fmt.Errorf("CDN ignored byte range %s (missing Content-Range)", value)
+	}
+	parts := strings.SplitN(contentRange, "/", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid Content-Range %q for byte range %s", contentRange, value)
+	}
+	rangeParts := strings.Fields(parts[0])
+	if len(rangeParts) != 2 || strings.ToLower(rangeParts[0]) != "bytes" {
+		return fmt.Errorf("invalid Content-Range %q for byte range %s", contentRange, value)
+	}
+	start, end, err := parseByteRange(rangeParts[1])
+	if err != nil {
+		return fmt.Errorf("invalid Content-Range %q for byte range %s", contentRange, value)
+	}
+	requestedStart, requestedEnd, err := parseByteRange(value)
+	if err != nil {
+		return err
+	}
+	if start != requestedStart || end != requestedEnd {
+		return fmt.Errorf("CDN returned Content-Range %q, expected bytes %d-%d", contentRange, requestedStart, requestedEnd)
+	}
+	if int64(len(data)) != expected {
+		return fmt.Errorf("byte range %s returned %d bytes, expected %d", value, len(data), expected)
+	}
+	return nil
 }
 
 func (w *worker) publish(clear []byte, contentType, prefix string) (string, string, string, error) {

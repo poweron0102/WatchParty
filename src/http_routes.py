@@ -296,6 +296,9 @@ async def stream_resource(request: Request, source_id: str, resource_id: str, v:
         raise _media_error(exc) from exc
     partial = requested_range is not None
     headers = {"Accept-Ranges": "bytes", "Content-Length": str(opened.content_length)}
+    if v:
+        etag = hashlib.sha256(v.encode()).hexdigest()
+        headers.update({"Cache-Control": "private, max-age=31536000, immutable", "ETag": f'"{etag}"'})
     if partial:
         headers["Content-Range"] = f"bytes {opened.start}-{opened.end}/{opened.total_size}"
     if request.method == "HEAD":

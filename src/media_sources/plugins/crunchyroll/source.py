@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 import shutil
+import sys
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -117,11 +118,16 @@ class ManagedCrunchyrollSource(CrunchyrollSource):
         return page
 
     async def inspect(self, media_id):
-        presentation = await super().inspect(media_id)
-        presentation = replace(presentation, media_id=media_id, title=self._titles.get(media_id, presentation.title))
+        presentation = await asyncio.to_thread(self.cache.load_presentation, media_id)
+        if presentation is None:
+            print(f"Crunchyroll cache: presentation_miss media={media_id}", file=sys.stderr)
+            presentation = await super().inspect(media_id)
+            presentation = replace(presentation, media_id=media_id, title=self._titles.get(media_id, presentation.title))
+            self.cache.remember(presentation, self._titles.get(media_id))
+        else:
+            print(f"Crunchyroll cache: presentation_hit media={media_id}", file=sys.stderr)
         # Local subtitle attachments alter the host manifest, but never the
         # remote media revision that owns the downloaded audio/video blobs.
-        self.cache.remember(presentation, self._titles.get(media_id))
         extra = []
         for attachment in self.cache.attachments_for(media_id):
             track_id = f"subtitle:local:{attachment['id']}"; rep_id = f"{track_id}:vtt"
@@ -140,7 +146,13 @@ class ManagedCrunchyrollSource(CrunchyrollSource):
         return SegmentArtifact(path, "text/vtt", path.stat().st_size, _digest(path))
 
     def locate(self, media_id, demand):
-        return self._attachment_artifact(media_id, demand) or self.cache.locate(media_id, demand)
+        artifact = self._attachment_artifact(media_id, demand) or self.cache.locate(media_id, demand)
+        clean = lambda value: re.sub(r"[\s\x00-\x1f]+", "_", str(value))[:160]
+        context = (f"media={clean(media_id)} track={clean(demand.track_id)} "
+                   f"representation={clean(demand.representation_id)} segment={clean(demand.segment_identity)} "
+                   f"priority={demand.priority.name.lower()}")
+        print(f"Crunchyroll cache: {'hit' if artifact else 'miss'} {context}", file=sys.stderr)
+        return artifact
 
     async def materialize(self, media_id, demand):
         existing = self.locate(media_id, demand)

@@ -67,7 +67,9 @@ func parseSIDX(data []byte, indexStart, indexEnd int64) ([]segment, map[string]s
 	pos += 2
 	count := int(binary.BigEndian.Uint16(data[pos : pos+2]))
 	pos += 2
-	base := uint64(indexEnd+1) + firstOffset
+	// first_offset is relative to the byte immediately following the sidx box,
+	// not to the end of the requested HTTP range (which may include padding).
+	base := uint64(indexStart) + uint64(boxSize) + firstOffset
 	current := earliest
 	segments := make([]segment, 0, count)
 	ranges := make(map[string]string, count)

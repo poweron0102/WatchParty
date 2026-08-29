@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src ./src
 COPY files ./files
-COPY save.json ./save.json
+COPY save.example.json ./save.json
 RUN mkdir -p cache
 
 CMD ["python", "src/main.py"]

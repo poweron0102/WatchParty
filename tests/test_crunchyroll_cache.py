@@ -14,6 +14,22 @@ from playback.models import (OriginPresentation, OriginRepresentation, OriginSeg
 
 
 class CrunchyrollCacheTests(unittest.TestCase):
+    def test_presentation_round_trip_supports_restart(self):
+        with tempfile.TemporaryDirectory() as root:
+            cache = CrunchyrollCache(root, "crunch")
+            segments = (OriginSegment("s1", 0, 4.5), OriginSegment("s2", 4.5, 5.5))
+            representation = OriginRepresentation(
+                "v1080", 2, "avc1", "video/mp4", "init", segments, 1920, 1080)
+            presentation = OriginPresentation(
+                "episode:1", "Episode", 10,
+                (OriginTrack("video", "video", (representation,), default=True),),
+                "stable-revision", canonical_video_representation="v1080")
+
+            cache.remember(presentation)
+            restored = CrunchyrollCache(root, "crunch").load_presentation("episode:1")
+
+            self.assertEqual(restored, presentation)
+
     def test_index_inventory_publish_and_filtered_cleanup(self):
         with tempfile.TemporaryDirectory() as root:
             cache = CrunchyrollCache(root, "crunch")

@@ -37,6 +37,23 @@ func TestParserInheritsSegmentTemplateFromPeriod(t *testing.T) {
 	}
 }
 
+func TestRevisionIgnoresEphemeralManifestURLs(t *testing.T) {
+	first := []byte(`<MPD mediaPresentationDuration="PT4S"><BaseURL>https://cdn.example/video/?token=first</BaseURL><Period><AdaptationSet contentType="video" mimeType="video/mp4"><SegmentTemplate timescale="1" initialization="init.mp4" media="$Time$.m4s"><SegmentTimeline><S d="2" r="1"/></SegmentTimeline></SegmentTemplate><Representation id="v" bandwidth="1" codecs="avc1"/></AdaptationSet></Period></MPD>`)
+	second := []byte(`<MPD mediaPresentationDuration="PT4S"><BaseURL>https://other-cdn.example/video/?token=second</BaseURL><Period><AdaptationSet contentType="video" mimeType="video/mp4"><SegmentTemplate timescale="1" initialization="init.mp4" media="$Time$.m4s"><SegmentTimeline><S d="2" r="1"/></SegmentTimeline></SegmentTemplate><Representation id="v" bandwidth="1" codecs="avc1"/></AdaptationSet></Period></MPD>`)
+
+	a, _, err := parseMPD(first, "https://api.example/first.mpd", "version", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := parseMPD(second, "https://api.example/second.mpd", "version", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.RevisionSeed != b.RevisionSeed {
+		t.Fatalf("semantic revisions differ: %q != %q", a.RevisionSeed, b.RevisionSeed)
+	}
+}
+
 func TestParserSelectsWidevinePSSHWhenPlayReadyIsAlsoPresent(t *testing.T) {
 	raw := []byte(`<MPD mediaPresentationDuration="PT2S" xmlns:cenc="urn:mpeg:cenc:2013"><Period><AdaptationSet contentType="video" mimeType="video/mp4"><ContentProtection schemeIdUri="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"><cenc:pssh>d2lkZXZpbmU=</cenc:pssh></ContentProtection><ContentProtection schemeIdUri="urn:uuid:9a04f079-9840-4286-ab92-e65be0885f95"><cenc:pssh>cGxheXJlYWR5</cenc:pssh></ContentProtection><SegmentTemplate timescale="1" initialization="init.mp4" media="$Time$.m4s"><SegmentTimeline><S d="2"/></SegmentTimeline></SegmentTemplate><Representation id="v" bandwidth="1" codecs="avc1"/></AdaptationSet></Period></MPD>`)
 	_, pssh, err := parseMPD(raw, "https://example.test/manifest.mpd", "version", "")

@@ -48,6 +48,8 @@ type versionState struct {
 	pssh      string
 	keys      *licenseContext
 	licenseMu sync.Mutex
+	initMu    sync.Mutex
+	inits     map[string][]byte
 }
 
 type mediaState struct {

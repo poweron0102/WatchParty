@@ -22,6 +22,7 @@ class CrunchyrollWorkerClient:
     def __init__(self, worker_path, cookie, options):
         self.path, self.cookie, self.options = str(worker_path), cookie, options
         self._process = None; self._pending = {}; self._reader = None; self._write_lock = asyncio.Lock()
+        self._pending_context = {}
         self._start_lock = asyncio.Lock()
 
     def _safe_diagnostic(self, message):
@@ -60,7 +61,9 @@ class CrunchyrollWorkerClient:
                 print(f"Crunchyroll worker [{code}]: {self._safe_diagnostic(message.get('message'))}", file=sys.stderr)
                 future.set_exception(SourceUnavailable("worker não pôde materializar o recurso"))
             elif message.get("event") == "stage":
-                print(f"Crunchyroll worker: {message.get('stage', 'working')}", file=sys.stderr)
+                context = self._pending_context.get(request_id, "")
+                suffix = f" {context}" if context else ""
+                print(f"Crunchyroll worker: {message.get('stage', 'working')}{suffix}", file=sys.stderr)
             elif message.get("event") in ("completed", "asset", "released"): future.set_result(message)
         for future in tuple(self._pending.values()):
             if not future.done(): future.set_exception(SourceUnavailable("worker de playback foi encerrado"))
@@ -68,12 +71,22 @@ class CrunchyrollWorkerClient:
     async def command(self, name, payload):
         if name != "activate": await self._start()
         request_id = uuid.uuid4().hex; future = asyncio.get_running_loop().create_future(); self._pending[request_id] = future
+        demand = payload.get("demand") or {}
+        priority = {0: "playback", 1: "buffer", 2: "canonical"}.get(demand.get("priority"), demand.get("priority"))
+        fields = [("command", name), ("media", payload.get("media_key")),
+                  ("track", demand.get("track_id")), ("representation", demand.get("representation_id")),
+                  ("segment", demand.get("segment_identity")), ("priority", priority)]
+        safe = lambda value: re.sub(r"[\s\x00-\x1f]+", "_", str(value))[:160]
+        self._pending_context[request_id] = " ".join(
+            f"{key}={safe(value)}" for key, value in fields if value is not None)
         message = {"version": self.VERSION, "command": name, "request_id": request_id, "correlation_id": uuid.uuid4().hex, **payload}
         try:
             async with self._write_lock:
                 self._process.stdin.write((json.dumps(message, separators=(",", ":")) + "\n").encode()); await self._process.stdin.drain()
             return await future
-        finally: self._pending.pop(request_id, None)
+        finally:
+            self._pending.pop(request_id, None)
+            self._pending_context.pop(request_id, None)
 
     async def inspect(self, media_id):
         result = await self.command("inspect_version", {"media_key": media_id})

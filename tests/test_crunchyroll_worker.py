@@ -13,7 +13,7 @@ from media_sources.plugins.crunchyroll.worker_client import CrunchyrollWorkerCli
 class CrunchyrollWorkerClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_process_stream_accepts_large_presentation_messages(self):
         process = AsyncMock(); process.returncode = None
-        process.stdout.readline.return_value = b""; process.stdin = AsyncMock()
+        process.stdout.readline.return_value = b""; process.stderr.readline.return_value = b""; process.stdin = AsyncMock()
         client = CrunchyrollWorkerClient("worker.exe", "secret", {})
         with patch("media_sources.plugins.crunchyroll.worker_client.asyncio.create_subprocess_exec", AsyncMock(return_value=process)) as create:
             with patch.object(client, "command", AsyncMock(return_value={})):

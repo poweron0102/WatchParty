@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import hashlib
+import asyncio
 import httpx
+import secrets
 import time
 from pathlib import Path
 from urllib.parse import quote
@@ -23,9 +25,12 @@ class CrunchyrollSource:
         self.cache_path = cache_path.resolve(); self.cache_path.mkdir(parents=True, exist_ok=True)
         self._metadata = self.cache_path / ".crunchyroll" / "manifests" / "catalog"
         self._metadata.mkdir(parents=True, exist_ok=True)
+        self._images = self.cache_path / ".crunchyroll" / "images"
+        self._images.mkdir(parents=True, exist_ok=True)
         self._api = api or CrunchyrollApi(etp_rt, locale)
         self._ttl = metadata_ttl_hours * 3600
         self._image_urls = {}
+        self._image_locks = {}
         self._worker = CrunchyrollWorkerClient(worker_path, etp_rt, worker_options or {}) if worker_path else None
 
     @property
@@ -84,7 +89,7 @@ class CrunchyrollSource:
         if not image_url: return None
         opaque = hashlib.sha256(image_url.encode()).hexdigest()
         self._image_urls[opaque] = image_url
-        return MediaResource(f"image:{opaque}", "image/jpeg")
+        return MediaResource(f"image:{opaque}", "image/jpeg", revision=opaque)
 
     @staticmethod
     def _payload_items(payload):
@@ -160,16 +165,54 @@ class CrunchyrollSource:
 
     async def open_resource(self, resource_id, byte_range=None):
         if not resource_id.startswith("image:"): raise ResourceNotFound("recurso não encontrado")
-        url = self._image_urls.get(resource_id[6:])
-        if not url: raise ResourceNotFound("recurso não encontrado")
-        try:
-            async with httpx.AsyncClient(timeout=20) as client:
-                response = await client.get(url); response.raise_for_status(); data = response.content
-        except httpx.HTTPError as exc: raise SourceUnavailable("imagem temporariamente indisponível") from exc
+        opaque = resource_id[6:]
+        if len(opaque) != 64 or any(value not in "0123456789abcdef" for value in opaque):
+            raise ResourceNotFound("recurso não encontrado")
+        path, metadata = self._images / opaque, self._images / f"{opaque}.json"
+        data, content_type = self._read_cached_image(path, metadata)
+        if data is None:
+            url = self._image_urls.get(opaque)
+            if not url: raise ResourceNotFound("recurso não encontrado")
+            lock = self._image_locks.setdefault(opaque, asyncio.Lock())
+            async with lock:
+                data, content_type = self._read_cached_image(path, metadata)
+                if data is None:
+                    try:
+                        async with httpx.AsyncClient(timeout=20) as client:
+                            response = await client.get(url); response.raise_for_status(); data = response.content
+                    except httpx.HTTPError as exc: raise SourceUnavailable("imagem temporariamente indisponível") from exc
+                    content_type = response.headers.get("content-type", "image/jpeg").split(";", 1)[0].strip()
+                    if not content_type.startswith("image/"): content_type = "application/octet-stream"
+                    self._publish_image(path, metadata, data, content_type)
         start, end = 0, len(data) - 1
         if byte_range:
             if byte_range.suffix_length is not None: start = max(0, len(data) - byte_range.suffix_length)
             else: start, end = byte_range.start or 0, min(byte_range.end if byte_range.end is not None else end, end)
         async def chunks():
             if data: yield data[start:end + 1]
-        return OpenedResource(chunks(), len(data), response.headers.get("content-type", "image/jpeg"), start, end)
+        return OpenedResource(chunks(), len(data), content_type, start, end)
+
+    @staticmethod
+    def _read_cached_image(path: Path, metadata: Path):
+        try:
+            data = path.read_bytes()
+            details = json.loads(metadata.read_text(encoding="utf-8"))
+            content_type = details.get("content_type", "image/jpeg")
+            if not isinstance(content_type, str): content_type = "image/jpeg"
+            return data, content_type
+        except (OSError, ValueError):
+            return None, None
+
+    @staticmethod
+    def _publish_image(path: Path, metadata: Path, data: bytes, content_type: str):
+        token = secrets.token_hex(8)
+        image_temp = path.with_name(f"{path.name}.{token}.tmp")
+        metadata_temp = metadata.with_name(f"{metadata.name}.{token}.tmp")
+        try:
+            image_temp.write_bytes(data)
+            metadata_temp.write_text(json.dumps({"content_type": content_type}), encoding="utf-8")
+            image_temp.replace(path)
+            metadata_temp.replace(metadata)
+        finally:
+            image_temp.unlink(missing_ok=True)
+            metadata_temp.unlink(missing_ok=True)

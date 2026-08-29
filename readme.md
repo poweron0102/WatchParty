@@ -45,6 +45,12 @@ download, adicionar ASS/SRT/VTT, limpar grupos de segmentos e executar `Salvar c
 MP4 nunca é criado automaticamente; jobs continuam ao fechar o navegador, mas não sobrevivem
 ao reinício do servidor.
 
+Apresentações já inspecionadas são reconstruídas desse índice no reinício. Trechos presentes no
+cache são reproduzidos sem abrir uma sessão remota; apenas um trecho ausente ativa o worker.
+Os logs `Crunchyroll cache: hit|miss` identificam faixa, representação, segmento e prioridade.
+Capas e thumbnails baixadas ficam em `<cache_path>/.crunchyroll/images` e continuam disponíveis
+offline até a remoção explícita do cache.
+
 Vídeos aceitos: MP4, MKV, WebM e AVI. Sidecars ficam junto ao vídeo nas convenções `.subs/<nome>.<idioma>.vtt` e `.dubs/<nome>.<idioma>.mp3|aac|ogg`. Imagens usam `.previews/<nome>_poster.png`, `.previews/<nome>_thumbnail.png`, `.previews/poster.png` e `.previews/thumbnail.png`; os nomes antigos com `banner.png` continuam aceitos para compatibilidade.
 
 ## Docker e TURN

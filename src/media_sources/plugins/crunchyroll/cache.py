@@ -9,7 +9,8 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from playback.models import OriginPresentation, SegmentArtifact, SegmentDemand
+from playback.models import (OriginPresentation, OriginRepresentation, OriginSegment,
+                             OriginTrack, SegmentArtifact, SegmentDemand)
 
 
 SCHEMA = 1
@@ -143,6 +144,38 @@ class CrunchyrollCache:
     def update_title(self, media_id: str, title: str):
         with self._connect() as db:
             db.execute("UPDATE media SET title=?, updated_at=? WHERE media_id=?", (title, time.time(), media_id))
+
+    def load_presentation(self, media_id: str) -> OriginPresentation | None:
+        with self._connect() as db:
+            media = db.execute("SELECT * FROM media WHERE media_id=?", (media_id,)).fetchone()
+            if not media:
+                return None
+            tracks = []
+            for track in db.execute(
+                    "SELECT * FROM tracks WHERE media_id=? AND revision=? ORDER BY rowid",
+                    (media_id, media["revision"])):
+                representations = []
+                for rep in db.execute(
+                        """SELECT * FROM representations
+                           WHERE media_id=? AND revision=? AND track_id=? ORDER BY rowid""",
+                        (media_id, media["revision"], track["track_id"])):
+                    segments = tuple(OriginSegment(row["identity"], row["start"], row["duration"])
+                        for row in db.execute(
+                            """SELECT identity,start,duration FROM segment_plan
+                               WHERE media_id=? AND revision=? AND track_id=? AND rep_id=?
+                                 AND start IS NOT NULL AND duration IS NOT NULL ORDER BY rowid""",
+                            (media_id, media["revision"], track["track_id"], rep["rep_id"])))
+                    representations.append(OriginRepresentation(
+                        rep["rep_id"], rep["bandwidth"], rep["codecs"], rep["mime_type"],
+                        rep["initialization"], segments, rep["width"], rep["height"]))
+                tracks.append(OriginTrack(
+                    track["track_id"], track["kind"], tuple(representations),
+                    track["language"], track["label"], bool(track["is_default"])))
+            if not tracks:
+                return None
+            return OriginPresentation(
+                media_id, media["title"], media["duration"], tuple(tracks), media["revision"],
+                canonical_video_representation=media["canonical_representation"])
 
     def remember_catalog(self, parent_id: str | None, items):
         parent = parent_id or "__root__"; now = time.time()

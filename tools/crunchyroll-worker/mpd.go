@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"net/url"
@@ -248,7 +249,13 @@ func parseMPD(raw []byte, manifestURL, versionID, language string) (presentation
 			}
 		}
 	}
-	h := sha256.Sum256(raw)
+	stable := publicPresentation(result)
+	stable.RevisionSeed = ""
+	normalized, err := json.Marshal(stable)
+	if err != nil {
+		return presentation{}, "", err
+	}
+	h := sha256.Sum256(normalized)
 	result.RevisionSeed = hex.EncodeToString(h[:])
 	return result, pssh, nil
 }
