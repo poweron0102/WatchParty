@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -142,16 +141,10 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 			continue
 		}
 		stage("download_manifest")
-		manifestStarted := time.Now()
-		fmt.Fprintf(os.Stderr, "[cr-worker] manifest request started media=%s language=%s\n", sanitizeMediaKey(mediaKey), languageForLog(requested, stream.AudioLocale))
 		raw, _, err := w.api.request("GET", stream.URL, nil, map[string]string{
 			"Origin": "https://static.crunchyroll.com", "Referer": "https://static.crunchyroll.com/",
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[cr-worker] manifest request failed media=%s language=%s elapsed=%s error=%s\n", sanitizeMediaKey(mediaKey), languageForLog(requested, stream.AudioLocale), time.Since(manifestStarted).Round(time.Millisecond), sanitize(err))
-		} else {
-			fmt.Fprintf(os.Stderr, "[cr-worker] manifest request completed media=%s language=%s status=2xx bytes=%d elapsed=%s\n", sanitizeMediaKey(mediaKey), languageForLog(requested, stream.AudioLocale), len(raw), time.Since(manifestStarted).Round(time.Millisecond))
-			fmt.Fprintf(os.Stderr, "[cr-worker] manifest raw begin media=%s\n%s\n[cr-worker] manifest raw end media=%s\n", sanitizeMediaKey(mediaKey), redactManifest(raw), sanitizeMediaKey(mediaKey))
 		}
 		if err != nil {
 			w.api.release(mediaKey, stream.Token)
@@ -167,7 +160,6 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 		versionID := fmt.Sprintf("%s@%s", playbackID, language)
 		parsed, pssh, err := parseMPD(raw, stream.URL, versionID, language)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[cr-worker] manifest parse failed media=%s language=%s elapsed=%s error=%s\n", sanitizeMediaKey(mediaKey), languageForLog(requested, stream.AudioLocale), time.Since(manifestStarted).Round(time.Millisecond), sanitize(err))
 			w.api.release(mediaKey, stream.Token)
 			if index == 0 {
 				return presentation{}, err
@@ -175,14 +167,12 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 			continue
 		}
 		if err := w.expandSegmentBases(&parsed); err != nil {
-			fmt.Fprintf(os.Stderr, "[cr-worker] segment base expansion failed media=%s error=%s\n", sanitizeMediaKey(mediaKey), sanitize(err))
 			w.api.release(mediaKey, stream.Token)
 			if index == 0 {
 				return presentation{}, err
 			}
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "[cr-worker] manifest parsed media=%s language=%s duration=%.3fs tracks=%d elapsed=%s\n", sanitizeMediaKey(mediaKey), languageForLog(requested, stream.AudioLocale), parsed.Duration, len(parsed.Tracks), time.Since(manifestStarted).Round(time.Millisecond))
 		keepSession := false
 		for _, tr := range parsed.Tracks {
 			if tr.Kind == "video" && index > 0 {
@@ -225,7 +215,6 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 	if len(p.Tracks) == 0 {
 		return presentation{}, errors.New("no playable tracks were discovered")
 	}
-	fmt.Fprintf(os.Stderr, "[cr-worker] inspect assembled media=%s tracks=%d versions=%d duration=%.3fs\n", sanitizeMediaKey(mediaKey), len(p.Tracks), len(versions), p.Duration)
 	p.Title = mediaKey
 	chooseCanonical(&p, w.opts.VideoQuality)
 	state := &mediaState{mediaKey: mediaKey, present: p, versions: versions}
@@ -233,7 +222,6 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 	w.active[mediaKey] = state
 	w.lastDemand = time.Now()
 	w.mu.Unlock()
-	fmt.Fprintf(os.Stderr, "[cr-worker] inspect completed media=%s\n", sanitizeMediaKey(mediaKey))
 	return publicPresentation(p), nil
 }
 
@@ -277,28 +265,6 @@ func (w *worker) expandSegmentBases(p *presentation) error {
 	return nil
 }
 
-func sanitizeMediaKey(value string) string {
-	if len(value) > 80 {
-		return value[:80]
-	}
-	return value
-}
-
-func languageForLog(requested, actual string) string {
-	if actual != "" {
-		return actual
-	}
-	if requested != "" {
-		return requested
-	}
-	return "default"
-}
-
-var manifestURLPattern = regexp.MustCompile(`https?://[^"'<>\s]+`)
-
-func redactManifest(raw []byte) string {
-	return manifestURLPattern.ReplaceAllString(string(raw), "<REDACTED_URL>")
-}
 func publicPresentation(p presentation) presentation {
 	copyP := p
 	copyP.Tracks = append([]track(nil), p.Tracks...)

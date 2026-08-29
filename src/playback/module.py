@@ -42,9 +42,7 @@ class PlaybackModule:
                 return self._active.descriptor
             try: origin = self._origins[selection.source_id]
             except KeyError as exc: raise PlaybackNotFound("origem não encontrada") from exc
-            print(f"[playback-debug] inspect starting source={selection.source_id} media={selection.media_id}", flush=True)
             presentation = await origin.inspect(selection.media_id)
-            print(f"[playback-debug] presentation received media={selection.media_id} tracks={len(presentation.tracks)}", flush=True)
             revision = hashlib.sha256((selection.source_id + "\0" + presentation.revision_seed).encode()).hexdigest()[:24]
             async with self._lock:
                 if self._active and self._active.selection == selection and self._active.descriptor.revision == revision:
@@ -59,7 +57,6 @@ class PlaybackModule:
                             resources[opaque] = SegmentDemand(track.id, rep.id, identity)
                             urls[(track.id, rep.id, identity)] = f'/playback/{playback_id}/asset/{opaque}'
                 manifest = build_mpd(presentation, urls)
-                print(f"[playback-debug] manifest built media={selection.media_id} bytes={len(manifest)} resources={len(resources)}", flush=True)
                 descriptor = PlaybackDescriptor(playback_id, revision,
                     MediaResource("manifest.mpd", "application/dash+xml", len(manifest)), presentation.title, presentation.image)
                 self._active = _Active(descriptor, selection, origin, presentation, manifest, resources)

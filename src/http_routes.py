@@ -244,9 +244,7 @@ async def search_catalog(source_id: str, q: str, cursor: str | None = None):
 @app.post("/api/playback/select")
 async def select_playback(selection: dict):
     try:
-        print(f"[playback-debug] select request source={selection.get('source_id')} media={selection.get('media_id')}", flush=True)
         descriptor = await PLAYBACK.select(PlaybackSelection(selection["source_id"], selection["media_id"]))
-        print(f"[playback-debug] select response playback={descriptor.playback_id}", flush=True)
     except (KeyError, PlaybackNotFound):
         raise fastapi.HTTPException(404, "Playback indisponível.")
     except Exception as exc:

@@ -61,9 +61,7 @@ class CrunchyrollWorkerClient:
                 future.set_exception(SourceUnavailable("worker não pôde materializar o recurso"))
             elif message.get("event") == "stage":
                 print(f"Crunchyroll worker: {message.get('stage', 'working')}", file=sys.stderr)
-            elif message.get("event") in ("completed", "asset", "released"):
-                print(f"Crunchyroll worker: {message.get('event')} command={message.get('command', 'unknown')}", file=sys.stderr)
-                future.set_result(message)
+            elif message.get("event") in ("completed", "asset", "released"): future.set_result(message)
         for future in tuple(self._pending.values()):
             if not future.done(): future.set_exception(SourceUnavailable("worker de playback foi encerrado"))
 
