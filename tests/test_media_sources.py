@@ -9,7 +9,7 @@ if SRC_DIR not in sys.path: sys.path.insert(0, SRC_DIR)
 
 from media_sources import (ByteRangeRequest, InvalidByteRange, InvalidSourceConfiguration,
                            MediaItemNotFound, ResourceNotFound, build_source_registry)
-from media_sources.directory import DirectorySource
+from media_sources.plugins.directory.source_core import DirectorySource
 
 
 async def collect(opened):

@@ -13,7 +13,7 @@ from playback import (OriginPresentation, OriginRepresentation, OriginSegment, O
                       PlaybackModule, PlaybackSelection, ResourceRequest, SegmentArtifact)
 from playback.models import PlaybackExpired, PlaybackPaused
 from playback.manifest import build_mpd
-from media_sources.directory_playback import _split_fragmented_mp4
+from media_sources.plugins.directory.playback import _split_fragmented_mp4
 
 
 class FakeOrigin:

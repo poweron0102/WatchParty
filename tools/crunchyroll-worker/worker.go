@@ -119,7 +119,10 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 		return presentation{}, err
 	}
 	w.api.release(mediaKey, discovery.Token)
-	languages := availableAudioLanguages(discovery, w.opts.AudioLanguages)
+	// Only query languages explicitly configured by the server. Automatically
+	// expanding the list from discovery can open several extra playback
+	// sessions and trigger Crunchyroll's rate limiting (HTTP 420).
+	languages := requestedLanguages(w.opts.AudioLanguages)
 	if len(languages) == 0 {
 		languages = []string{""}
 	}

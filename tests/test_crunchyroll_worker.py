@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if SRC_DIR not in sys.path: sys.path.insert(0, SRC_DIR)
 
-from media_sources.crunchyroll_worker import CrunchyrollWorkerClient
+from media_sources.plugins.crunchyroll.worker_client import CrunchyrollWorkerClient
 
 
 class CrunchyrollWorkerClientTests(unittest.IsolatedAsyncioTestCase):
@@ -15,7 +15,7 @@ class CrunchyrollWorkerClientTests(unittest.IsolatedAsyncioTestCase):
         process = AsyncMock(); process.returncode = None
         process.stdout.readline.return_value = b""; process.stdin = AsyncMock()
         client = CrunchyrollWorkerClient("worker.exe", "secret", {})
-        with patch("media_sources.crunchyroll_worker.asyncio.create_subprocess_exec", AsyncMock(return_value=process)) as create:
+        with patch("media_sources.plugins.crunchyroll.worker_client.asyncio.create_subprocess_exec", AsyncMock(return_value=process)) as create:
             with patch.object(client, "command", AsyncMock(return_value={})):
                 await client._start()
                 await asyncio.sleep(0)

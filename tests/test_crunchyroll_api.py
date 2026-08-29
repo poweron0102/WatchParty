@@ -8,7 +8,7 @@ import httpx
 SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if SRC_DIR not in sys.path: sys.path.insert(0, SRC_DIR)
 
-from media_sources.crunchyroll_api import CrunchyrollApi
+from media_sources.plugins.crunchyroll.api import CrunchyrollApi
 
 
 class CrunchyrollApiTests(unittest.IsolatedAsyncioTestCase):

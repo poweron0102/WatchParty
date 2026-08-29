@@ -7,7 +7,7 @@ from pathlib import Path
 SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if SRC_DIR not in sys.path: sys.path.insert(0, SRC_DIR)
 
-from media_sources.crunchyroll import CrunchyrollSource
+from media_sources.plugins.crunchyroll.catalog_core import CrunchyrollSource
 from media_sources.models import EntryType
 
 

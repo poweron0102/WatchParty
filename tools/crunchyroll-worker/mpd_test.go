@@ -44,10 +44,9 @@ func TestRequestedLanguagesAreOrderedAndDeduplicated(t *testing.T) {
 	}
 }
 
-func TestAvailableAudioLanguagesKeepsConfiguredDefaultsFirstAndDiscoversRest(t *testing.T) {
-	stream := playbackResponse{AudioLocale: "ja-JP", Versions: []playbackVersion{{AudioLocale: "en-US"}, {AudioLocale: "pt-BR"}}}
-	got := availableAudioLanguages(stream, []string{"pt-BR"})
-	if len(got) != 3 || got[0] != "pt-BR" || got[1] != "ja-JP" || got[2] != "en-US" {
+func TestRequestedLanguagesUsesOnlyConfiguredValues(t *testing.T) {
+	got := requestedLanguages([]string{"pt-BR", "pt-BR", "en-US"})
+	if len(got) != 2 || got[0] != "pt-BR" || got[1] != "en-US" {
 		t.Fatalf("languages=%v", got)
 	}
 }
