@@ -50,3 +50,4 @@ dist/
 .DS_Store
 Thumbs.db
 Desktop.ini
+/tools/crunchyroll-worker/.gocache-debug
