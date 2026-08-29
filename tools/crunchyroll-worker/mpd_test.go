@@ -26,6 +26,17 @@ func TestNegativeRepeatUsesDuration(t *testing.T) {
 	}
 }
 
+func TestParserInheritsSegmentTemplateFromPeriod(t *testing.T) {
+	raw := []byte(`<MPD mediaPresentationDuration="PT4S"><Period><SegmentTemplate timescale="1" initialization="init.mp4" media="$Time$.m4s"><SegmentTimeline><S d="2" r="1"/></SegmentTimeline></SegmentTemplate><AdaptationSet contentType="video" mimeType="video/mp4"><Representation id="v" bandwidth="1" codecs="avc1"/></AdaptationSet></Period></MPD>`)
+	p, _, err := parseMPD(raw, "https://cdn.example/manifest.mpd", "version", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Tracks) != 1 || len(p.Tracks[0].Representations[0].Segments) != 2 {
+		t.Fatalf("tracks=%d segments=%d", len(p.Tracks), len(p.Tracks[0].Representations[0].Segments))
+	}
+}
+
 func TestParserSelectsWidevinePSSHWhenPlayReadyIsAlsoPresent(t *testing.T) {
 	raw := []byte(`<MPD mediaPresentationDuration="PT2S" xmlns:cenc="urn:mpeg:cenc:2013"><Period><AdaptationSet contentType="video" mimeType="video/mp4"><ContentProtection schemeIdUri="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"><cenc:pssh>d2lkZXZpbmU=</cenc:pssh></ContentProtection><ContentProtection schemeIdUri="urn:uuid:9a04f079-9840-4286-ab92-e65be0885f95"><cenc:pssh>cGxheXJlYWR5</cenc:pssh></ContentProtection><SegmentTemplate timescale="1" initialization="init.mp4" media="$Time$.m4s"><SegmentTimeline><S d="2"/></SegmentTimeline></SegmentTemplate><Representation id="v" bandwidth="1" codecs="avc1"/></AdaptationSet></Period></MPD>`)
 	_, pssh, err := parseMPD(raw, "https://example.test/manifest.mpd", "version", "")

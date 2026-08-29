@@ -31,6 +31,8 @@ type representation struct {
 	versionID      string
 	initURL        string
 	mediaURLs      map[string]string
+	mediaRanges    map[string]string
+	initRange      string
 }
 
 type segment struct {

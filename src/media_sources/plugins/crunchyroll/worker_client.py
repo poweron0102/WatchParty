@@ -36,10 +36,18 @@ class CrunchyrollWorkerClient:
             if self._process and self._process.returncode is None: return
             try:
                 self._process = await asyncio.create_subprocess_exec(self.path, stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, limit=self.STREAM_LIMIT)
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=self.STREAM_LIMIT)
             except OSError as exc: raise SourceUnavailable("worker de playback indisponível") from exc
             self._reader = asyncio.create_task(self._read())
+            asyncio.create_task(self._read_stderr())
             await self.command("activate", {"etp_rt": self.cookie, "options": self.options})
+
+    async def _read_stderr(self):
+        process = self._process
+        if not process or not process.stderr:
+            return
+        while line := await process.stderr.readline():
+            print(f"Crunchyroll worker stderr: {self._safe_diagnostic(line.decode(errors='replace').rstrip())}", file=sys.stderr)
 
     async def _read(self):
         while self._process and (line := await self._process.stdout.readline()):
@@ -53,7 +61,9 @@ class CrunchyrollWorkerClient:
                 future.set_exception(SourceUnavailable("worker não pôde materializar o recurso"))
             elif message.get("event") == "stage":
                 print(f"Crunchyroll worker: {message.get('stage', 'working')}", file=sys.stderr)
-            elif message.get("event") in ("completed", "asset", "released"): future.set_result(message)
+            elif message.get("event") in ("completed", "asset", "released"):
+                print(f"Crunchyroll worker: {message.get('event')} command={message.get('command', 'unknown')}", file=sys.stderr)
+                future.set_result(message)
         for future in tuple(self._pending.values()):
             if not future.done(): future.set_exception(SourceUnavailable("worker de playback foi encerrado"))
 

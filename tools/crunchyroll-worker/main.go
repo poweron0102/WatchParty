@@ -2,10 +2,17 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"os"
+	"runtime/debug"
 )
 
 func main() {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			fmt.Fprintf(os.Stderr, "[cr-worker] panic: %v\n%s\n", recovered, debug.Stack())
+		}
+	}()
 	w := newWorker(os.Stdout)
 	go w.idle()
 	done := make(chan struct{})

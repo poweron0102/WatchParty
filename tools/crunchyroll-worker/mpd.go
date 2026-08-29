@@ -12,14 +12,16 @@ import (
 )
 
 type xMPD struct {
-	XMLName  xml.Name  `xml:"MPD"`
-	Duration string    `xml:"mediaPresentationDuration,attr"`
-	Base     string    `xml:"BaseURL"`
-	Periods  []xPeriod `xml:"Period"`
+	XMLName  xml.Name   `xml:"MPD"`
+	Duration string     `xml:"mediaPresentationDuration,attr"`
+	Base     string     `xml:"BaseURL"`
+	Template *xTemplate `xml:"SegmentTemplate"`
+	Periods  []xPeriod  `xml:"Period"`
 }
 type xPeriod struct {
-	Base string `xml:"BaseURL"`
-	Sets []xSet `xml:"AdaptationSet"`
+	Base     string     `xml:"BaseURL"`
+	Template *xTemplate `xml:"SegmentTemplate"`
+	Sets     []xSet     `xml:"AdaptationSet"`
 }
 type xSet struct {
 	ID          string        `xml:"id,attr"`
@@ -29,8 +31,16 @@ type xSet struct {
 	Lang        string        `xml:"lang,attr"`
 	Base        string        `xml:"BaseURL"`
 	Template    *xTemplate    `xml:"SegmentTemplate"`
+	SegmentBase *xSegmentBase `xml:"SegmentBase"`
 	Reps        []xRep        `xml:"Representation"`
 	Protections []xProtection `xml:"ContentProtection"`
+}
+type xSegmentBase struct {
+	IndexRange     string           `xml:"indexRange,attr"`
+	Initialization *xInitialization `xml:"Initialization"`
+}
+type xInitialization struct {
+	Range string `xml:"range,attr"`
 }
 type xRep struct {
 	ID          string        `xml:"id,attr"`
@@ -41,6 +51,7 @@ type xRep struct {
 	Height      *int          `xml:"height,attr"`
 	Base        string        `xml:"BaseURL"`
 	Template    *xTemplate    `xml:"SegmentTemplate"`
+	SegmentBase *xSegmentBase `xml:"SegmentBase"`
 	Protections []xProtection `xml:"ContentProtection"`
 }
 type xTemplate struct {
@@ -196,8 +207,26 @@ func parseMPD(raw []byte, manifestURL, versionID, language string) (presentation
 				if tmpl == nil {
 					tmpl = set.Template
 				}
+				if tmpl == nil {
+					tmpl = p.Template
+				}
+				if tmpl == nil {
+					tmpl = doc.Template
+				}
 				repBase := resolve(setBase, rep.Base)
 				initURL, mediaURLs, segs := expand(tmpl, rep.ID, repBase, duration)
+				var mediaRanges map[string]string
+				initRange := ""
+				if rep.SegmentBase != nil {
+					initURL, mediaURLs, segs = repBase, map[string]string{}, nil
+					mediaRanges = map[string]string{}
+					if rep.SegmentBase.Initialization != nil {
+						initRange = rep.SegmentBase.Initialization.Range
+					}
+					if rep.SegmentBase.IndexRange != "" {
+						mediaRanges["__index__"] = rep.SegmentBase.IndexRange
+					}
+				}
 				mime := rep.MimeType
 				if mime == "" {
 					mime = set.MimeType
@@ -206,7 +235,7 @@ func parseMPD(raw []byte, manifestURL, versionID, language string) (presentation
 				if codecs == "" {
 					codecs = set.Codecs
 				}
-				rr := representation{ID: tr.ID + ":" + rep.ID, Bandwidth: rep.Bandwidth, Codecs: codecs, MimeType: mime, Initialization: "init", Width: rep.Width, Height: rep.Height, Segments: segs, versionID: versionID, initURL: initURL, mediaURLs: mediaURLs}
+				rr := representation{ID: tr.ID + ":" + rep.ID, Bandwidth: rep.Bandwidth, Codecs: codecs, MimeType: mime, Initialization: "init", Width: rep.Width, Height: rep.Height, Segments: segs, versionID: versionID, initURL: initURL, mediaURLs: mediaURLs, mediaRanges: mediaRanges, initRange: initRange}
 				tr.Representations = append(tr.Representations, rr)
 				for _, cp := range rep.Protections {
 					if isWidevineProtection(cp) && strings.TrimSpace(cp.PSSH) != "" {

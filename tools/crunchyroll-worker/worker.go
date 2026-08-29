@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +32,7 @@ func newWorker(out io.Writer) *worker {
 }
 func (w *worker) emit(e event) { w.output.Lock(); defer w.output.Unlock(); _ = w.writer.Encode(e) }
 func (w *worker) fail(c command, code string, err error) {
+	fmt.Fprintf(os.Stderr, "[cr-worker] command=%s media=%s code=%s error=%s\n", c.Command, c.MediaKey, code, sanitize(err))
 	e := response(c, "failed")
 	e.Code = code
 	e.Message = sanitize(err)
@@ -140,9 +142,17 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 			continue
 		}
 		stage("download_manifest")
+		manifestStarted := time.Now()
+		fmt.Fprintf(os.Stderr, "[cr-worker] manifest request started media=%s language=%s\n", sanitizeMediaKey(mediaKey), languageForLog(requested, stream.AudioLocale))
 		raw, _, err := w.api.request("GET", stream.URL, nil, map[string]string{
 			"Origin": "https://static.crunchyroll.com", "Referer": "https://static.crunchyroll.com/",
 		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[cr-worker] manifest request failed media=%s language=%s elapsed=%s error=%s\n", sanitizeMediaKey(mediaKey), languageForLog(requested, stream.AudioLocale), time.Since(manifestStarted).Round(time.Millisecond), sanitize(err))
+		} else {
+			fmt.Fprintf(os.Stderr, "[cr-worker] manifest request completed media=%s language=%s status=2xx bytes=%d elapsed=%s\n", sanitizeMediaKey(mediaKey), languageForLog(requested, stream.AudioLocale), len(raw), time.Since(manifestStarted).Round(time.Millisecond))
+			fmt.Fprintf(os.Stderr, "[cr-worker] manifest raw begin media=%s\n%s\n[cr-worker] manifest raw end media=%s\n", sanitizeMediaKey(mediaKey), redactManifest(raw), sanitizeMediaKey(mediaKey))
+		}
 		if err != nil {
 			w.api.release(mediaKey, stream.Token)
 			if index == 0 {
@@ -157,12 +167,22 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 		versionID := fmt.Sprintf("%s@%s", playbackID, language)
 		parsed, pssh, err := parseMPD(raw, stream.URL, versionID, language)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "[cr-worker] manifest parse failed media=%s language=%s elapsed=%s error=%s\n", sanitizeMediaKey(mediaKey), languageForLog(requested, stream.AudioLocale), time.Since(manifestStarted).Round(time.Millisecond), sanitize(err))
 			w.api.release(mediaKey, stream.Token)
 			if index == 0 {
 				return presentation{}, err
 			}
 			continue
 		}
+		if err := w.expandSegmentBases(&parsed); err != nil {
+			fmt.Fprintf(os.Stderr, "[cr-worker] segment base expansion failed media=%s error=%s\n", sanitizeMediaKey(mediaKey), sanitize(err))
+			w.api.release(mediaKey, stream.Token)
+			if index == 0 {
+				return presentation{}, err
+			}
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "[cr-worker] manifest parsed media=%s language=%s duration=%.3fs tracks=%d elapsed=%s\n", sanitizeMediaKey(mediaKey), languageForLog(requested, stream.AudioLocale), parsed.Duration, len(parsed.Tracks), time.Since(manifestStarted).Round(time.Millisecond))
 		keepSession := false
 		for _, tr := range parsed.Tracks {
 			if tr.Kind == "video" && index > 0 {
@@ -205,6 +225,7 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 	if len(p.Tracks) == 0 {
 		return presentation{}, errors.New("no playable tracks were discovered")
 	}
+	fmt.Fprintf(os.Stderr, "[cr-worker] inspect assembled media=%s tracks=%d versions=%d duration=%.3fs\n", sanitizeMediaKey(mediaKey), len(p.Tracks), len(versions), p.Duration)
 	p.Title = mediaKey
 	chooseCanonical(&p, w.opts.VideoQuality)
 	state := &mediaState{mediaKey: mediaKey, present: p, versions: versions}
@@ -212,7 +233,71 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 	w.active[mediaKey] = state
 	w.lastDemand = time.Now()
 	w.mu.Unlock()
+	fmt.Fprintf(os.Stderr, "[cr-worker] inspect completed media=%s\n", sanitizeMediaKey(mediaKey))
 	return publicPresentation(p), nil
+}
+
+func (w *worker) expandSegmentBases(p *presentation) error {
+	for ti := range p.Tracks {
+		for ri := range p.Tracks[ti].Representations {
+			r := &p.Tracks[ti].Representations[ri]
+			if r.initRange == "" || len(r.Segments) != 0 {
+				continue
+			}
+			start, end, err := parseByteRange(r.initRange)
+			if err != nil {
+				return err
+			}
+			_ = start
+			_ = end
+			// SegmentBase metadata is carried in the representation URL/range fields by parseMPD.
+			indexRange := r.mediaRanges["__index__"]
+			if indexRange == "" {
+				return fmt.Errorf("segment base has no index range")
+			}
+			is, ie, err := parseByteRange(indexRange)
+			if err != nil {
+				return err
+			}
+			data, _, err := w.api.request("GET", r.initURL, nil, map[string]string{"Range": fmt.Sprintf("bytes=%d-%d", is, ie), "Origin": "https://static.crunchyroll.com", "Referer": "https://static.crunchyroll.com/"})
+			if err != nil {
+				return err
+			}
+			segments, ranges, err := parseSIDX(data, is, ie)
+			if err != nil {
+				return err
+			}
+			delete(r.mediaRanges, "__index__")
+			r.Segments, r.mediaRanges = segments, ranges
+			for _, segment := range segments {
+				r.mediaURLs[segment.Identity] = r.initURL
+			}
+		}
+	}
+	return nil
+}
+
+func sanitizeMediaKey(value string) string {
+	if len(value) > 80 {
+		return value[:80]
+	}
+	return value
+}
+
+func languageForLog(requested, actual string) string {
+	if actual != "" {
+		return actual
+	}
+	if requested != "" {
+		return requested
+	}
+	return "default"
+}
+
+var manifestURLPattern = regexp.MustCompile(`https?://[^"'<>\s]+`)
+
+func redactManifest(raw []byte) string {
+	return manifestURLPattern.ReplaceAllString(string(raw), "<REDACTED_URL>")
 }
 func publicPresentation(p presentation) presentation {
 	copyP := p
@@ -295,7 +380,7 @@ func (w *worker) materialize(mediaKey string, d demand, stage func(string)) (str
 		return "", "", "", err
 	}
 	stage("download_init")
-	init, _, err := w.api.request("GET", found.initURL, nil, map[string]string{"Origin": "https://static.crunchyroll.com", "Referer": "https://static.crunchyroll.com/"})
+	init, err := w.requestRange(found.initURL, found.initRange)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -310,7 +395,7 @@ func (w *worker) materialize(mediaKey string, d demand, stage func(string)) (str
 		if first == "" {
 			return "", "", "", errors.New("representation has no media segments")
 		}
-		media, _, e := w.api.request("GET", first, nil, map[string]string{"Origin": "https://static.crunchyroll.com", "Referer": "https://static.crunchyroll.com/"})
+		media, e := w.requestRange(first, found.mediaRanges[d.SegmentIdentity])
 		if e != nil {
 			return "", "", "", e
 		}
@@ -325,7 +410,7 @@ func (w *worker) materialize(mediaKey string, d demand, stage func(string)) (str
 		if target == "" {
 			return "", "", "", errors.New("unknown segment")
 		}
-		media, _, e := w.api.request("GET", target, nil, map[string]string{"Origin": "https://static.crunchyroll.com", "Referer": "https://static.crunchyroll.com/"})
+		media, e := w.requestRange(target, found.mediaRanges[d.SegmentIdentity])
 		if e != nil {
 			return "", "", "", e
 		}
@@ -337,6 +422,29 @@ func (w *worker) materialize(mediaKey string, d demand, stage func(string)) (str
 	}
 	stage("publish")
 	return w.publish(clear, found.MimeType, "segment")
+}
+
+func (w *worker) requestRange(target, value string) ([]byte, error) {
+	headers := map[string]string{"Origin": "https://static.crunchyroll.com", "Referer": "https://static.crunchyroll.com/"}
+	if value != "" {
+		headers["Range"] = "bytes=" + value
+	}
+	data, responseHeaders, err := w.api.request("GET", target, nil, headers)
+	if err == nil && value != "" {
+		start, end, rangeErr := parseByteRange(value)
+		expected := end - start + 1
+		contentRange := responseHeaders.Get("Content-Range")
+		if rangeErr != nil {
+			return nil, rangeErr
+		}
+		if contentRange == "" {
+			return nil, fmt.Errorf("CDN ignored byte range %s (missing Content-Range)", value)
+		}
+		if int64(len(data)) != expected {
+			return nil, fmt.Errorf("byte range %s returned %d bytes, expected %d", value, len(data), expected)
+		}
+	}
+	return data, err
 }
 
 func (w *worker) publish(clear []byte, contentType, prefix string) (string, string, string, error) {
