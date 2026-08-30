@@ -38,6 +38,8 @@ class CrunchyrollApi:
                 response.raise_for_status(); payload = response.json()
                 self._token = payload["access_token"]; self._expires = time.monotonic() + int(payload.get("expires_in", 300))
             except (httpx.HTTPError, KeyError, ValueError) as exc:
+                self._token = input("Falha na autenticação do catálogo. Insira o valor do cookie access_token: ").strip()
+                self._expires = time.monotonic() + 300
                 raise SourceUnavailable("autenticação do catálogo indisponível") from exc
 
     async def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
