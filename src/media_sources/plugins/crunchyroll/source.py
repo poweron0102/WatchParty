@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import heapq
 import itertools
+import json
 import os
 import re
 import secrets
@@ -14,7 +15,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from media_sources.models import CatalogEntry, CatalogPage, EntryType, MediaItem
+from media_sources.models import CatalogEntry, CatalogPage, EntryType, MediaItem, MediaResource
 from playback.models import (DemandPriority, OriginPresentation, OriginRepresentation, OriginTrack,
                              SegmentArtifact, SegmentDemand)
 
@@ -114,8 +115,50 @@ class ManagedCrunchyrollSource(CrunchyrollSource):
 
     async def browse(self, parent_id=None, cursor=None):
         page = await super().browse(parent_id, cursor)
-        await asyncio.to_thread(self.cache.remember_catalog, parent_id, page.items)
+        await asyncio.to_thread(self.cache.remember_catalog, parent_id, page.items, self._image_urls)
         return page
+
+    def _catalog_resource(self, value):
+        if not value:
+            return None
+        try:
+            data = json.loads(value) if isinstance(value, str) else value
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(data, dict) or not data.get("id"):
+            return None
+        if data.get("url"):
+            self._image_urls[data["id"]] = data["url"]
+        return MediaResource(data["id"], data.get("content_type") or "image/jpeg",
+                             data.get("size"), data.get("revision"))
+
+    def _catalog_entry(self, row):
+        kind = row.get("entity_kind") or (row["child_id"].split(":", 1)[0]
+                                           if ":" in row["child_id"] else "video")
+        return CatalogEntry(
+            row["child_id"], row["title"],
+            EntryType(row["entry_type"]),
+            "video" if row["entry_type"] == EntryType.PLAYABLE.value else None,
+            self._catalog_resource(row.get("image")),
+            poster=self._catalog_resource(row.get("poster")),
+            thumbnail=self._catalog_resource(row.get("thumbnail")),
+            entity_kind=kind,
+        )
+
+    async def _hydrate_catalog_entry(self, row):
+        entry = self._catalog_entry(row)
+        if entry.image or entry.poster or entry.thumbnail:
+            return entry
+        try:
+            remote = await super().get_entity(row["child_id"])
+        except Exception:
+            return entry
+        await asyncio.to_thread(self.cache.update_catalog_images, row["child_id"],
+                                remote.image, remote.poster, remote.thumbnail, self._image_urls)
+        return CatalogEntry(
+            entry.id, entry.title, entry.entry_type, entry.media_kind,
+            remote.image, poster=remote.poster, thumbnail=remote.thumbnail,
+            entity_kind=entry.entity_kind)
 
     async def browse_view(self, view, parent_id=None, cursor=None):
         if view != "cache-local":
@@ -128,7 +171,7 @@ class ManagedCrunchyrollSource(CrunchyrollSource):
         inventory = await asyncio.to_thread(self.cache.inventory)
         cached = {row["media_id"]: row for row in inventory if row["state"] != "empty"}
         with self.cache._connect() as db:
-            edges = [dict(row) for row in db.execute("SELECT parent_id,child_id,title,entry_type FROM catalog_edges")]
+            edges = [dict(row) for row in db.execute("SELECT * FROM catalog_edges")]
         by_parent = {}
         by_child = {}
         for edge in edges:
@@ -157,7 +200,13 @@ class ManagedCrunchyrollSource(CrunchyrollSource):
         for media_id, row in visible.items():
             kind = media_id.split(":", 1)[0] if ":" in media_id else "video"
             if kind in {"episode", "movie", "video"}:
-                items.append(CatalogEntry(media_id, row["title"], EntryType.PLAYABLE, "video", entity_kind=kind))
+                edge = {**{"child_id": media_id, "title": row["title"],
+                          "entry_type": EntryType.PLAYABLE.value, "entity_kind": kind},
+                        **by_child.get(media_id, [{}])[0]}
+                entry = await self._hydrate_catalog_entry(edge)
+                items.append(CatalogEntry(media_id, row["title"], EntryType.PLAYABLE, "video",
+                                          entry.image, poster=entry.poster, thumbnail=entry.thumbnail,
+                                          entity_kind=kind))
 
         collections = {}
         candidates = by_parent.get(parent_id, []) if parent_id and parent_id != "cache-group:ungrouped" else edges
@@ -166,8 +215,7 @@ class ManagedCrunchyrollSource(CrunchyrollSource):
         for edge in candidates:
             child = edge["child_id"]
             if edge["entry_type"] == EntryType.COLLECTION.value and has_cached_descendant(child):
-                collections[child] = CatalogEntry(child, edge["title"], EntryType.COLLECTION,
-                                                   entity_kind=child.split(":", 1)[0])
+                collections[child] = await self._hydrate_catalog_entry(edge)
         if parent_id is None and any(media_id not in {edge["child_id"] for edge in edges} for media_id in cached):
             collections["cache-group:ungrouped"] = CatalogEntry("cache-group:ungrouped", "Sem agrupamento",
                                                                  EntryType.COLLECTION, entity_kind="group")

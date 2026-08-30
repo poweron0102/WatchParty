@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import secrets
 import sqlite3
@@ -93,13 +94,19 @@ class CrunchyrollCache:
                 );
                 CREATE TABLE IF NOT EXISTS catalog_edges(
                     parent_id TEXT NOT NULL, child_id TEXT NOT NULL, title TEXT NOT NULL, entry_type TEXT NOT NULL,
-                    updated_at REAL NOT NULL, PRIMARY KEY(parent_id, child_id)
+                    updated_at REAL NOT NULL, entity_kind TEXT, image TEXT, poster TEXT, thumbnail TEXT,
+                    PRIMARY KEY(parent_id, child_id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_segments_media ON segments(media_id, revision);
                 CREATE INDEX IF NOT EXISTS idx_rep_height ON representations(height);
             """)
             db.execute("INSERT OR REPLACE INTO metadata(key,value) VALUES('schema',?)", (str(SCHEMA),))
             db.execute("INSERT OR REPLACE INTO metadata(key,value) VALUES('source_id',?)", (self.source_id,))
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(catalog_edges)")}
+            for name, definition in (("entity_kind", "TEXT"), ("image", "TEXT"),
+                                     ("poster", "TEXT"), ("thumbnail", "TEXT")):
+                if name not in columns:
+                    db.execute(f"ALTER TABLE catalog_edges ADD COLUMN {name} {definition}")
 
     def reconcile(self):
         for folder in (self.incoming, self.export_temp):
@@ -177,12 +184,47 @@ class CrunchyrollCache:
                 media_id, media["title"], media["duration"], tuple(tracks), media["revision"],
                 canonical_video_representation=media["canonical_representation"])
 
-    def remember_catalog(self, parent_id: str | None, items):
+    def remember_catalog(self, parent_id: str | None, items, image_urls=None):
         parent = parent_id or "__root__"; now = time.time()
+        image_urls = image_urls or {}
+
+        def resource_data(resource):
+            if resource is None:
+                return None
+            return {
+                "id": resource.id,
+                "content_type": resource.content_type,
+                "size": resource.size,
+                "revision": resource.revision,
+                "url": image_urls.get(resource.id),
+            }
+
         with self._connect() as db:
             db.execute("DELETE FROM catalog_edges WHERE parent_id=?", (parent,))
-            db.executemany("INSERT INTO catalog_edges VALUES(?,?,?,?,?)", (
-                (parent, item.id, item.title, item.entry_type.value, now) for item in items))
+            db.executemany("""INSERT INTO catalog_edges
+                (parent_id,child_id,title,entry_type,updated_at,entity_kind,image,poster,thumbnail)
+                VALUES(?,?,?,?,?,?,?,?,?)""", (
+                (parent, item.id, item.title, item.entry_type.value, now,
+                 item.entity_kind or (item.id.split(":", 1)[0] if ":" in item.id else None),
+                 json.dumps(resource_data(item.image), ensure_ascii=False),
+                 json.dumps(resource_data(item.poster), ensure_ascii=False),
+                 json.dumps(resource_data(item.thumbnail), ensure_ascii=False))
+                for item in items))
+
+    def update_catalog_images(self, child_id, image=None, poster=None, thumbnail=None, image_urls=None):
+        image_urls = image_urls or {}
+
+        def resource_data(resource):
+            if resource is None:
+                return None
+            return json.dumps({"id": resource.id, "content_type": resource.content_type,
+                               "size": resource.size, "revision": resource.revision,
+                               "url": image_urls.get(resource.id)}, ensure_ascii=False)
+
+        with self._connect() as db:
+            db.execute("""UPDATE catalog_edges SET image=?,poster=?,thumbnail=?
+                          WHERE child_id=?""",
+                       (resource_data(image), resource_data(poster), resource_data(thumbnail), child_id))
 
     def descendants(self, parent_id: str) -> list[str]:
         with self._connect() as db:

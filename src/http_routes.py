@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import ipaddress
 import os
+import re
 import secrets
 import sys
 from dataclasses import asdict
@@ -77,8 +78,10 @@ def _snapshot_entry(source_id, item):
 def _local_entry(source_id, row, *, favorite=False, history=None):
     snapshot = row.get("snapshot") or {}
     kind = row.get("entity_kind") or "video"
-    value = {"id": row["media_id"], "title": row["title"], "entry_type": "playable",
-             "media_kind": "video", "entity_kind": kind, "source_id": source_id,
+    is_collection = kind in {"series", "season", "collection", "group"}
+    value = {"id": row["media_id"], "title": row["title"],
+             "entry_type": "collection" if is_collection else "playable",
+             "media_kind": None if is_collection else "video", "entity_kind": kind, "source_id": source_id,
              "image": snapshot.get("image"), "poster": snapshot.get("poster"),
              "thumbnail": snapshot.get("thumbnail"), "favorited": favorite}
     if history is not None:
@@ -95,6 +98,8 @@ def _media_error(exc: Exception):
         return fastapi.HTTPException(416, "Intervalo de bytes inválido.")
     if isinstance(exc, (SourceUnavailable, SourceReadError)):
         return fastapi.HTTPException(503, "Origem temporariamente indisponível.")
+    message = re.sub(r"https?://\S+", "<url>", str(exc) or type(exc).__name__)
+    print(f"Falha ao acessar origem: {type(exc).__name__}: {message[:240]}", file=sys.stderr)
     return fastapi.HTTPException(500, "Falha ao acessar a origem.")
 
 
@@ -234,7 +239,7 @@ async def source_host_action(request: Request, source_id: str, action: str):
 @app.get("/api/catalog")
 async def browse_catalog(source_id: str, parent_id: str | None = None, cursor: str | None = None,
                          view: str | None = None):
-    if view in {"history", "favorites"}:
+    if view in {"history", "favorites"} and parent_id is None:
         rows = host_store.history(source_id) if view == "history" else host_store.favorites(source_id)
         items = [_local_entry(source_id, row, favorite=view == "favorites",
                               history=row if view == "history" else None) for row in rows]

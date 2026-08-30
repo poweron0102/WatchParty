@@ -10,8 +10,9 @@ SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if SRC_DIR not in sys.path: sys.path.insert(0, SRC_DIR)
 
 from media_sources.plugins.crunchyroll.catalog_core import CrunchyrollSource
+from media_sources.plugins.crunchyroll.cache import CrunchyrollCache
 from media_sources.plugins.crunchyroll.source import ManagedCrunchyrollSource
-from media_sources.models import EntryType
+from media_sources.models import CatalogEntry, EntryType, MediaResource
 from playback import PlaybackModule, PlaybackSelection, ResourceRequest
 from playback.models import (OriginPresentation, OriginRepresentation, OriginSegment,
                              OriginTrack, SegmentArtifact, SegmentDemand)
@@ -83,6 +84,26 @@ class CrunchyrollSourceTests(unittest.IsolatedAsyncioTestCase):
         source.cache.remember(expected)
 
         self.assertEqual(await source.inspect("episode:cached"), expected)
+
+    async def test_managed_source_restores_catalog_artwork_from_cache(self):
+        source = ManagedCrunchyrollSource.__new__(ManagedCrunchyrollSource)
+        source.cache = CrunchyrollCache(Path(self.temp.name), "crunch")
+        source._image_urls = {}
+        poster = MediaResource("image:poster", "image/jpeg", revision="poster")
+        source.cache.remember_catalog(None, (
+            CatalogEntry("series:cached", "Cached series", EntryType.COLLECTION,
+                         image=poster, poster=poster, entity_kind="series"),
+        ), {poster.id: "https://img.example/poster.jpg"})
+
+        with source.cache._connect() as db:
+            row = dict(db.execute(
+                "SELECT * FROM catalog_edges WHERE child_id='series:cached'"
+            ).fetchone())
+        restored = source._catalog_entry(row)
+
+        self.assertEqual(restored.entity_kind, "series")
+        self.assertEqual(restored.poster, poster)
+        self.assertEqual(source._image_urls[poster.id], "https://img.example/poster.jpg")
 
     async def test_complete_cached_playback_opens_without_worker(self):
         source = ManagedCrunchyrollSource(
