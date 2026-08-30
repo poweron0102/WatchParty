@@ -1,12 +1,13 @@
 import uuid
 import html
 import ipaddress
+import time
 from urllib.parse import urlencode, urlparse
 
 from config import MEDIA_SOURCES
 from media_sources import MediaSourceError
 from server_setup import sio
-from state import server_state
+from state import host_store, server_state
 
 
 SCREEN_SHARE_VIDEO_ID = "screen-share"
@@ -31,6 +32,50 @@ def _is_control_panel(sid):
         return False
 
 
+def _entity_kind(media_id: str) -> str:
+    prefix = media_id.split(":", 1)[0]
+    return prefix if prefix in {"series", "season", "episode", "movie"} else "video"
+
+
+def _current_identity():
+    selection = server_state.get("current_video")
+    snapshot = server_state.get("current_media_snapshot") or {}
+    if not selection or not snapshot:
+        return None
+    return selection, snapshot, _entity_kind(selection["media_id"])
+
+
+def _checkpoint_current(force=False, completed=None):
+    current = _current_identity()
+    if not current:
+        return
+    selection, snapshot, kind = current
+    position = float(server_state.get("current_time") or 0)
+    now = time.monotonic()
+    previous_position = server_state.get("history_last_checkpoint_position")
+    previous_at = server_state.get("history_last_checkpoint_monotonic")
+    should_save = force or previous_position is None or (
+        now - previous_at >= 15 and position - previous_position >= 5)
+    if not should_save:
+        return
+    host_store.checkpoint(selection["source_id"], selection["media_id"], kind,
+                          position=position, duration=snapshot.get("duration"), completed=completed,
+                          title=snapshot.get("title"), snapshot=snapshot)
+    server_state["history_last_checkpoint_position"] = position
+    server_state["history_last_checkpoint_monotonic"] = now
+
+
+def _snapshot_for_item(source_id, item):
+    value = {"title": item.title, "image": None, "poster": None, "thumbnail": None}
+    for field in ("image", "poster", "thumbnail"):
+        resource = getattr(item, field, None)
+        if resource:
+            value[field] = {"id": resource.id, "content_type": resource.content_type,
+                            "revision": resource.revision,
+                            "url": "/media/resource?" + urlencode({"source_id": source_id, "resource_id": resource.id})}
+    return value
+
+
 async def _stop_active_screen_share(reset_video=True):
     if not server_state.get("is_screen_sharing"):
         server_state["screen_share_session_id"] = None
@@ -42,6 +87,7 @@ async def _stop_active_screen_share(reset_video=True):
 
     if reset_video:
         server_state["current_video"] = None
+        server_state["current_media_snapshot"] = None
         server_state["current_time"] = 0
         server_state["is_paused"] = True
 
@@ -178,6 +224,7 @@ async def set_video(sid, selection):
     except MediaSourceError:
         await sio.emit("media_selection_error", {"message": "Não foi possível selecionar esse item."}, to=sid)
         return
+    _checkpoint_current(force=True)
     selection = {"source_id": source_id, "media_id": media_id}
     print(f"Seleção de mídia definida na origem {source_id}")
 
@@ -185,14 +232,23 @@ async def set_video(sid, selection):
         await _stop_active_screen_share(reset_video=False)
 
     server_state["current_video"] = selection
-    server_state["current_time"] = 0
+    kind = _entity_kind(media_id)
+    snapshot = _snapshot_for_item(source_id, item)
+    resume = host_store.resume(source_id, media_id, kind)
+    duration = resume.get("duration") if resume else None
+    can_resume = resume and not resume.get("completed") and (not duration or resume["position"] < duration * .95)
+    server_state["current_time"] = resume["position"] if can_resume else 0
     server_state["is_paused"] = True
+    server_state["current_media_snapshot"] = {**snapshot, "duration": duration}
+    server_state["history_last_checkpoint_position"] = None
+    server_state["history_last_checkpoint_monotonic"] = None
     server_state["is_screen_sharing"] = False
     server_state["screen_share_session_id"] = None
 
     await sio.emit("sync_event", {
         "type": "set_video",
         "video": selection,
+        "time": server_state["current_time"],
         "session_id": None
     })
 
@@ -215,13 +271,31 @@ async def host_sync_event(sid, data):
     if server_state.get("is_screen_sharing"):
         return
 
+    if not isinstance(data, dict) or not isinstance(data.get("type"), str):
+        return
     if data["type"] == "play":
         server_state["is_paused"] = False
+        current = _current_identity()
+        if current:
+            selection, snapshot, kind = current
+            host_store.record_play(selection["source_id"], selection["media_id"], kind,
+                                   title=snapshot.get("title", selection["media_id"]), snapshot=snapshot,
+                                   position=float(data.get("time", server_state.get("current_time") or 0)),
+                                   duration=snapshot.get("duration"))
+            server_state["history_last_checkpoint_position"] = float(data.get("time", server_state.get("current_time") or 0))
+            server_state["history_last_checkpoint_monotonic"] = time.monotonic()
     elif data["type"] == "pause":
         server_state["is_paused"] = True
 
     if "time" in data:
         server_state["current_time"] = data["time"]
+    if "duration" in data and server_state.get("current_media_snapshot"):
+        server_state["current_media_snapshot"]["duration"] = data["duration"]
+
+    if data["type"] in {"pause", "seek", "ended"}:
+        _checkpoint_current(force=True, completed=True if data["type"] == "ended" else None)
+    elif data["type"] in {"timeupdate", "checkpoint"}:
+        _checkpoint_current()
 
     await sio.emit("sync_event", data, skip_sid=sid)
 

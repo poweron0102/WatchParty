@@ -1,202 +1,35 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel do Host - Watch Party</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="icon" type="image/png" href="system_avatar.png">
-    <style>
-        :root {
-            --bg-primary: #121212;
-            --bg-secondary: #1e1e1e;
-            --bg-tertiary: #2c2c2c;
-            --text-primary: #e0e0e0;
-            --text-secondary: #b3b3b3;
-            --border-color: #333;
-            --accent-color: #007bff;
-            --accent-hover: #0056b3;
-        }
-        body { font-family: 'Inter', sans-serif; background-color: var(--bg-primary); color: var(--text-primary); }
-        .brand { color: var(--accent-color); }
-        .bg-brand { background-color: var(--accent-color); }
-        .bg-brand:hover { background-color: var(--accent-hover); }
-        .border-brand { border-color: var(--accent-color); }
-        .ring-brand { --tw-ring-color: var(--accent-color); }
-        .bg-card { background-color: var(--bg-secondary); }
-        .bg-input { background-color: var(--bg-tertiary); }
-        .border-input { border-color: var(--border-color); }
-        .media-grid-layout {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-            gap: 1rem;
-        }
-        #video-grid.media-grid-layout {
-            /* Aumenta o tamanho mínimo dos itens de vídeo para dar mais destaque */
-            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-        }
-        .media-item {
-            position: relative;
-            cursor: pointer;
-            border-radius: 0.5rem;
-            overflow: hidden; /* Garante que os cantos arredondados do banner sejam cortados */
-            background-color: var(--bg-tertiary);
-            transition: transform 0.2s ease-in-out;
-            /* Adicionado para o tooltip */
-        }
-        .media-item:hover {
-            transform: scale(1.05);
-            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3), 0 4px 6px -2px rgba(0,0,0,0.2);
-        }
-        .media-item img.banner {
-            width: 100%;
-            height: auto;
-            object-fit: cover;
-            display: block;
-            border-radius: 0.5rem 0.5rem 0 0;
-        }
-        .media-item.folder img.banner {
-            aspect-ratio: 2 / 3; /* Proporção de poster/banner */
-        }
-        .media-item.video img.banner {
-            aspect-ratio: 16 / 9; /* Proporção de vídeo */
-        }
-        .media-item .file-name {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            font-size: 0.875rem;
-            padding: 0.75rem;
-            text-align: center;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            background-color: rgba(30, 30, 30, 0.7);
-            backdrop-filter: blur(4px);
-        }
-        .media-item .file-name:hover {
-            white-space: normal;
-        }
-        .media-item .type-indicator {
-            position: absolute;
-            top: 0.5rem;
-            left: 0.5rem;
-            background-color: rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(5px);
-            border-radius: 0.375rem;
-            padding: 0.25rem 0.5rem;
-            display: flex;
-            align-items: center;
-            gap: 0.25rem;
-            font-size: 0.75rem;
-            font-weight: 500;
-        }
-    </style>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel do Host - Watch Party</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" type="image/png" href="system_avatar.png">
+<style>
+:root{--bg-primary:#121212;--bg-secondary:#1e1e1e;--bg-tertiary:#2c2c2c;--text-primary:#e0e0e0;--text-secondary:#b3b3b3;--border-color:#333;--accent-color:#007bff;--accent-hover:#0056b3}
+body{font-family:Inter,sans-serif;background:var(--bg-primary);color:var(--text-primary)}.brand{color:var(--accent-color)}.bg-brand{background:var(--accent-color)}.bg-brand:hover{background:var(--accent-hover)}.bg-card{background:var(--bg-secondary)}.bg-input{background:var(--bg-tertiary)}.border-input{border-color:var(--border-color)}
+.media-grid-layout{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:1rem}#video-grid.media-grid-layout{grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+.media-item{position:relative;cursor:pointer;border-radius:.5rem;overflow:hidden;background:var(--bg-tertiary);transition:transform .2s}.media-item:hover{transform:scale(1.03);box-shadow:0 10px 15px -3px #0005}.media-item img.banner{width:100%;object-fit:cover;display:block}.media-item.folder img.banner{aspect-ratio:2/3}.media-item.video img.banner{aspect-ratio:16/9}.media-item .file-name{display:block;width:100%;font-size:.875rem;padding:.75rem;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--bg-secondary)}.media-item .file-name:hover{white-space:normal}
+.type-indicator,.favorite-badge{position:absolute;top:.5rem;background:#000a;backdrop-filter:blur(5px);border-radius:.375rem;padding:.25rem .5rem;z-index:2}.type-indicator{left:.5rem;font-size:.75rem}.favorite-badge{right:.5rem;color:#cbd5e1;line-height:1}.favorite-badge.is-favorite{color:#facc15}.view-sidebar{min-width:180px}.view-item.active{background:var(--bg-tertiary);border-left:3px solid var(--accent-color)}.modal-backdrop{background:#000b}.modal-panel{width:min(640px,92vw);max-height:88vh}.modal-body{overflow-y:auto}
+@media(max-width:767px){.view-sidebar{min-width:0;display:flex;overflow-x:auto;gap:.5rem;padding-bottom:.5rem}.view-item{white-space:nowrap;border-left:0!important;border-bottom:2px solid transparent}.view-item.active{border-bottom-color:var(--accent-color)}}
+</style>
 </head>
 <body>
-    <div class="container mx-auto p-4 md:p-8 max-w-7xl">
-        <header class="mb-8">
-            <h1 class="text-4xl font-bold mb-2" style="color: var(--text-primary);">Painel do Host</h1>
-            <p class="text-lg" style="color: var(--text-secondary);">Gerencie sua sessão de Watch Party e selecione o conteúdo para todos.</p>
-            <a href="/party" target="_blank" class="font-semibold brand hover:underline">Assista aqui</a>
-        </header>
-
-        <div id="status-message" class="hidden mb-6 rounded-md px-4 py-3" role="status"></div>
-
-        <main class="grid grid-cols-1 gap-6 lg:gap-8">
-            <!-- Coluna da Esquerda: Widgets -->
-            <div class="flex flex-col gap-6">
-                <!-- Card: Link de Convite -->
-                <div class="bg-card p-6 rounded-lg shadow-lg">
-                    <h2 class="text-xl font-semibold mb-4" style="color: var(--text-primary);">Link de Convite</h2>
-                    <div class="flex gap-2">
-                        <input type="text" id="invite-link-field" value="Carregando..." readonly class="w-full bg-input border border-input rounded-md px-3 py-2 focus:outline-none focus:ring-2 ring-brand">
-                        <button id="copy-link-btn" class="bg-brand text-white px-4 py-2 rounded-md font-semibold flex items-center gap-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--bg-secondary)] ring-brand">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z"></path><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z"></path></svg>
-                            <span>Copiar</span>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Card: Configuração WebRTC -->
-                <div class="bg-card p-6 rounded-lg shadow-lg">
-                    <h2 class="text-xl font-semibold mb-2" style="color: var(--text-primary);">Conexão WebRTC</h2>
-                    <p class="text-sm mb-4" style="color: var(--text-secondary);">Escolha como novas conexões de tela e microfone usarão o servidor TURN.</p>
-                    <label for="rtc-mode-select" class="block text-sm font-medium mb-2">Modo de conexão</label>
-                    <select id="rtc-mode-select" class="w-full bg-input border border-input rounded-md px-3 py-2 focus:outline-none focus:ring-2 ring-brand">
-                        <option value="off">Sem TURN</option>
-                        <option value="auto">Automático (fallback)</option>
-                        <option value="relay">Forçar TURN</option>
-                    </select>
-                    <p id="rtc-mode-description" class="text-sm mt-3" style="color: var(--text-secondary);"></p>
-                    <p id="rtc-mode-status" class="text-sm mt-2" role="status" aria-live="polite"></p>
-                </div>
-
-                <!-- Card: Origem de mídia -->
-                <div class="bg-card p-6 rounded-lg shadow-lg">
-                    <h2 class="text-xl font-semibold mb-2" style="color: var(--text-primary);">Origem de Mídia</h2>
-                    <p class="text-sm mb-4" style="color: var(--text-secondary);">Escolha o catálogo que deseja navegar.</p>
-                    <label for="source-select" class="block text-sm font-medium mb-2">Catálogo ativo</label>
-                    <select id="source-select" class="w-full bg-input border border-input rounded-md px-3 py-2 focus:outline-none focus:ring-2 ring-brand"></select>
-                    <ul id="source-diagnostics" class="text-sm mt-3 text-red-300"></ul>
-                </div>
-
-                <div class="bg-card p-6 rounded-lg shadow-lg">
-                    <h2 class="text-xl font-semibold mb-2" style="color: var(--text-primary);">Acesso administrativo</h2>
-                    <label class="flex items-center gap-3">
-                        <input id="remote-host-admin-toggle" type="checkbox" class="h-5 w-5">
-                        <span>Permitir administração remota sem autenticação</span>
-                    </label>
-                    <p id="remote-host-admin-status" class="text-sm mt-3" style="color: var(--text-secondary);" role="status"></p>
-                </div>
-
-                <div id="source-extension-card" class="bg-card p-6 rounded-lg shadow-lg hidden">
-                    <h2 id="source-extension-title" class="text-xl font-semibold mb-4" style="color: var(--text-primary);">Ferramentas da origem</h2>
-                    <div id="source-extension-root"></div>
-                </div>
-
-            </div>
-
-            <!-- Coluna da Direita: Explorador de Mídia -->
-            <div class="bg-card p-6 rounded-lg shadow-lg h-full flex flex-col">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-xl font-semibold" style="color: var(--text-primary);">Explorador de Mídia</h2>
-                </div>
-
-                <form id="catalog-search" class="flex gap-2 mb-4">
-                    <input id="catalog-search-input" type="search" placeholder="Buscar no catálogo" class="w-full bg-input border border-input rounded-md px-3 py-2">
-                    <button class="bg-brand text-white px-4 py-2 rounded-md" type="submit">Buscar</button>
-                </form>
-
-                <!-- Breadcrumbs -->
-                <nav class="mb-4 text-sm" style="color: var(--text-secondary);">
-                    <ol id="breadcrumbs-container" class="flex items-center flex-wrap gap-1"></ol>
-                </nav>
-
-                <!-- Grid de Mídia -->
-                <div class="flex-grow min-h-[300px] flex flex-col gap-8">
-                    <div>
-                        <h3 class="text-lg font-semibold mb-3 border-b border-b-[var(--border-color)] pb-2" style="color: var(--text-primary);">Vídeos</h3>
-                        <div id="video-grid" class="media-grid-layout">
-                            <!-- Vídeos serão inseridos aqui -->
-                        </div>
-                    </div>
-                    <div>
-                        <h3 class="text-lg font-semibold mb-3 border-b border-b-[var(--border-color)] pb-2" style="color: var(--text-primary);">Pastas</h3>
-                        <div id="folder-grid" class="media-grid-layout">
-                            <!-- Pastas serão inseridas aqui -->
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </main>
-    </div>
-
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-    <script src="host.js?v=4"></script>
-</body>
-</html>
+<div class="container mx-auto p-4 md:p-8 max-w-7xl">
+<header class="mb-8"><h1 class="text-4xl font-bold mb-2">Painel do Host</h1><p class="text-lg">Gerencie sua sessão de Watch Party e selecione o conteudo para todos.</p><a href="/party" target="_blank" class="font-semibold brand hover:underline">Assista aqui</a></header>
+<div id="status-message" class="hidden mb-6 rounded-md px-4 py-3" role="status"></div>
+<main class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(280px,1fr)_2fr] lg:gap-8">
+<div class="flex flex-col gap-6">
+<div class="bg-card p-6 rounded-lg shadow-lg"><h2 class="text-xl font-semibold mb-4">Link de Convite</h2><div class="flex gap-2"><input type="text" id="invite-link-field" value="Carregando..." readonly class="w-full bg-input border border-input rounded-md px-3 py-2"><button id="copy-link-btn" class="bg-brand text-white px-4 py-2 rounded-md">Copiar</button></div></div>
+<div class="bg-card p-6 rounded-lg shadow-lg"><h2 class="text-xl font-semibold mb-2">Conexao WebRTC</h2><p class="text-sm mb-4">Escolha como novas conexoes usarao o servidor TURN.</p><label for="rtc-mode-select" class="block text-sm font-medium mb-2">Modo de conexao</label><select id="rtc-mode-select" class="w-full bg-input border border-input rounded-md px-3 py-2"><option value="off">Sem TURN</option><option value="auto">Automatico (fallback)</option><option value="relay">Forcar TURN</option></select><p id="rtc-mode-description" class="text-sm mt-3"></p><p id="rtc-mode-status" class="text-sm mt-2" role="status"></p></div>
+<div class="bg-card p-6 rounded-lg shadow-lg"><h2 class="text-xl font-semibold mb-2">Origem de Midia</h2><p class="text-sm mb-4">Escolha o catalogo que deseja navegar.</p><label for="source-select" class="block text-sm font-medium mb-2">Catalogo ativo</label><select id="source-select" class="w-full bg-input border border-input rounded-md px-3 py-2"></select><ul id="source-diagnostics" class="text-sm mt-3 text-red-300"></ul></div>
+<div class="bg-card p-6 rounded-lg shadow-lg"><h2 class="text-xl font-semibold mb-2">Acesso administrativo</h2><label class="flex items-center gap-3"><input id="remote-host-admin-toggle" type="checkbox" class="h-5 w-5"><span>Permitir administracao remota sem autenticacao</span></label><p id="remote-host-admin-status" class="text-sm mt-3" role="status"></p></div>
+<button id="source-tools-button" type="button" class="hidden bg-card p-4 rounded-lg shadow-lg text-left hover:bg-input">Ferramentas da origem <span aria-hidden="true">&gt;</span></button>
+</div>
+<section class="bg-card p-6 rounded-lg shadow-lg h-full flex flex-col"><h2 class="text-xl font-semibold mb-4">Explorador de Midia</h2><form id="catalog-search" class="flex gap-2 mb-4"><input id="catalog-search-input" type="search" placeholder="Buscar no catalogo" class="w-full bg-input border border-input rounded-md px-3 py-2"><button class="bg-brand text-white px-4 py-2 rounded-md" type="submit">Buscar</button></form><div class="flex flex-col md:flex-row gap-5 flex-grow min-h-[300px]"><nav id="catalog-views" class="view-sidebar flex flex-col gap-1" aria-label="Views do catalogo"></nav><div class="flex-grow min-w-0"><nav id="breadcrumbs-nav" class="mb-4 text-sm"><ol id="breadcrumbs-container" class="flex items-center flex-wrap gap-1"></ol></nav><div id="catalog-loading" class="hidden text-gray-500 mb-3">Carregando...</div><div id="video-section"><h3 class="text-lg font-semibold mb-3 border-b border-b-[var(--border-color)] pb-2">Videos</h3><div id="video-grid" class="media-grid-layout"></div></div><div id="folder-section" class="mt-8"><h3 class="text-lg font-semibold mb-3 border-b border-b-[var(--border-color)] pb-2">Pastas</h3><div id="folder-grid" class="media-grid-layout"></div></div></div></div></section>
+</main></div>
+<div id="tools-modal" class="modal-backdrop fixed inset-0 hidden items-center justify-center p-4 z-40" role="dialog" aria-modal="true"><div class="modal-panel bg-card rounded-lg shadow-2xl flex flex-col"><header class="p-5 border-b border-input flex justify-between"><h2 id="tools-modal-title" class="text-xl font-semibold">Ferramentas</h2><button type="button" data-close-modal="tools-modal" class="text-2xl" aria-label="Fechar">X</button></header><div id="tools-modal-body" class="modal-body p-5"><span id="source-extension-root"></span></div></div></div>
+<div id="inspector-modal" class="modal-backdrop fixed inset-0 hidden items-center justify-center p-4 z-40" role="dialog" aria-modal="true"><div class="modal-panel bg-card rounded-lg shadow-2xl flex flex-col"><header class="p-5 border-b border-input flex justify-between"><div><h2 id="inspector-modal-title" class="text-xl font-semibold">Inspetor</h2><p id="inspector-modal-context" class="text-sm text-gray-400"></p></div><button type="button" data-close-modal="inspector-modal" class="text-2xl" aria-label="Fechar">X</button></header><div class="modal-body p-5"><section class="border border-input rounded-md p-3 mb-4"><label class="flex items-center gap-2"><input id="inspector-favorite" type="checkbox"><span>Favorito</span></label></section><div id="inspector-plugin-root"></div></div><footer id="inspector-modal-footer" class="hidden p-4 border-t border-input"></footer></div></div>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script><script src="host.js?v=5"></script>
+</body></html>

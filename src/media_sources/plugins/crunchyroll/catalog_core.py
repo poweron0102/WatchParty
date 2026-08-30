@@ -117,12 +117,13 @@ class CrunchyrollSource:
             image = thumbnail if is_playable else poster
             entries.append(CatalogEntry(f"{local_kind}:{identifier}", str(title), EntryType.PLAYABLE if is_playable else EntryType.COLLECTION,
                                         "video" if is_playable else None, image,
-                                        poster=poster, thumbnail=thumbnail))
+                                        poster=poster, thumbnail=thumbnail, entity_kind=local_kind))
         return tuple(entries)
 
     async def browse(self, parent_id=None, cursor=None):
         if parent_id is None:
-            return CatalogPage(tuple(CatalogEntry(f"root:{key}", label, EntryType.COLLECTION) for key, label in self.ROOTS))
+            return CatalogPage(tuple(CatalogEntry(f"root:{key}", label, EntryType.COLLECTION,
+                                                  entity_kind="view") for key, label in self.ROOTS))
         offset = int(cursor or 0)
         if parent_id.startswith("root:"):
             kind = parent_id[5:]
@@ -162,6 +163,16 @@ class CrunchyrollSource:
         # Playback inspection is delegated to the private worker adapter; never expose upstream URLs here.
         return MediaItem(entry.id, entry.title, MediaResource("playback", "application/dash+xml"),
                          image=entry.image, poster=entry.poster, thumbnail=entry.thumbnail)
+
+    async def get_entity(self, entity_id):
+        """Return a typed catalog entity for inspector/favorite snapshots."""
+        remote_id = self._remote_id(entity_id)
+        payload = await self._cached(f"entity:{remote_id}", lambda: self._api.get(
+            f"/content/v2/cms/objects/{quote(remote_id)}"))
+        entries = self._entries(payload)
+        if not entries:
+            raise MediaItemNotFound("item nÃ£o encontrado")
+        return entries[0]
 
     async def open_resource(self, resource_id, byte_range=None):
         if not resource_id.startswith("image:"): raise ResourceNotFound("recurso não encontrado")

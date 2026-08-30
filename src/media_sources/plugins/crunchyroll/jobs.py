@@ -10,10 +10,15 @@ class Job:
         self.id = secrets.token_urlsafe(12); self.kind = kind; self.state = "queued"
         self.completed = 0; self.total = 0; self.message = None; self.error = None
         self.created_at = time.time(); self.updated_at = self.created_at
+        self.failures = []
         self.cancelled = asyncio.Event(); self.resumed = asyncio.Event(); self.resumed.set()
 
     def view(self):
-        return {key: getattr(self, key) for key in ("id", "kind", "state", "completed", "total", "message", "error", "created_at", "updated_at")}
+        return {key: getattr(self, key) for key in ("id", "kind", "state", "completed", "total", "message", "error", "created_at", "updated_at", "failures")}
+
+    def add_failure(self, media_id, stage, error, attempt=1, fallback=None):
+        self.failures.append({"media_id": str(media_id), "stage": str(stage), "attempt": int(attempt),
+                              "fallback": fallback, "error": str(error)[:500]})
 
     async def checkpoint(self):
         if self.cancelled.is_set(): raise asyncio.CancelledError
@@ -37,7 +42,7 @@ class TransientJobs:
             job.state = "running"; job.updated_at = time.time()
             try:
                 await runner(job)
-                if job.state != "cancelled": job.state = "completed"
+                if job.state != "cancelled": job.state = "completed_with_failures" if job.failures else "completed"
             except asyncio.CancelledError:
                 job.state = "cancelled"
             except Exception as exc:

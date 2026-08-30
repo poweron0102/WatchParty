@@ -11,6 +11,7 @@ export function updateStatusIndicator(statusIndicator, isHost) {
 }
 
 export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIndicator, hostPanel, screenShareBtn, closeHostPanelBtn, isHostRef }) {
+    let checkpointTimer = null;
     statusIndicator.addEventListener('click', () => {
         if (isHostRef.value) hostPanel.style.display = 'block';
     });
@@ -35,6 +36,10 @@ export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIn
 
         if (isHostRef.value && !syncState.isSyncing) {
             socket.emit('host_sync', { type: 'play', time: player.currentTime });
+            clearInterval(checkpointTimer);
+            checkpointTimer = setInterval(() => socket.emit('host_sync', {
+                type: 'checkpoint', time: player.currentTime, duration: player.media.duration
+            }), 15000);
             return;
         }
 
@@ -54,6 +59,7 @@ export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIn
 
         if (isHostRef.value && !syncState.isSyncing) {
             socket.emit('host_sync', { type: 'pause', time: player.currentTime });
+            clearInterval(checkpointTimer); checkpointTimer = null;
             return;
         }
 
@@ -68,6 +74,13 @@ export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIn
 
         if (isHostRef.value && !syncState.isSyncing) {
             socket.emit('host_sync', { type: 'seek', time: player.currentTime });
+        }
+    });
+
+    player.on('ended', () => {
+        if (isHostRef.value && !syncState.isSyncing) {
+            socket.emit('host_sync', { type: 'ended', time: player.currentTime, duration: player.media.duration });
+            clearInterval(checkpointTimer); checkpointTimer = null;
         }
     });
 

@@ -14,7 +14,14 @@ def create_server_state():
         "screen_share_session_id": None,
         "rtc_mode": "auto",
         "allow_remote_host_admin": ALLOW_REMOTE_HOST_ADMIN,
+        "current_media_snapshot": None,
+        "history_last_checkpoint_position": None,
+        "history_last_checkpoint_monotonic": None,
     }
 
 
 server_state = create_server_state()
+
+from host_store import HostStore
+
+host_store = HostStore("cache/watchparty.sqlite3")

@@ -27,6 +27,8 @@ class LoadedPlugin:
     factory: Callable[[str, dict[str, Any]], object]
     host_module: Path | None = None
     python_dependencies: tuple[str, ...] = ()
+    host_capabilities: tuple[str, ...] = ()
+    views: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -86,7 +88,19 @@ def discover_plugins(root: str | Path | None = None) -> PluginCatalog:
             version = raw.get("version", "0")
             if not isinstance(version, str) or not version.strip():
                 raise ValueError("version inválida")
-            loaded[type_name] = LoadedPlugin(type_name, version, folder.resolve(), factory, host_module, dependencies)
+            raw_capabilities = raw.get("host_capabilities", [])
+            if not isinstance(raw_capabilities, list) or any(not isinstance(value, str) or not value for value in raw_capabilities):
+                raise ValueError("host_capabilities deve ser uma lista de strings")
+            raw_views = raw.get("views", [])
+            if not isinstance(raw_views, list) or any(not isinstance(value, dict) for value in raw_views):
+                raise ValueError("views deve ser uma lista de objetos")
+            views = []
+            for view in raw_views:
+                if not isinstance(view.get("id"), str) or not isinstance(view.get("label"), str):
+                    raise ValueError("cada view precisa de id e label")
+                views.append({"id": view["id"], "label": view["label"], "count": view.get("count")})
+            loaded[type_name] = LoadedPlugin(type_name, version, folder.resolve(), factory, host_module,
+                                             dependencies, tuple(raw_capabilities), tuple(views))
         except Exception as exc:
             diagnostics.append(PluginDiagnostic(folder.name, f"{type(exc).__name__}: {exc}"))
     return PluginCatalog(loaded, tuple(diagnostics))

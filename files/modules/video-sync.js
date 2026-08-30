@@ -31,7 +31,7 @@ export function handleSyncEvent(data, player, _dubPlayer, _dubDelay, isHostRef, 
         if (isHostRef.value && getScreenStream()) stopScreenShare({ emit: false, sessionId: data.session_id });
         if (player.media.srcObject) { player.media.srcObject.getTracks().forEach(track => track.stop()); player.media.srcObject = null; }
         if (isScreenShareVideo(data.video)) { syncState.loadToken++; clearMedia(player); player.pause(); showNotification('O host iniciou uma transmissão de tela.', 'info'); }
-        else applySelection(data.video, player).then(ok => { if (ok) { player.pause(); player.currentTime = 0; } }).catch(error => showNotification(error.message, 'error'));
+        else applySelection(data.video, player).then(ok => { if (ok) { player.pause(); player.currentTime = Number(data.time || 0); } }).catch(error => showNotification(error.message, 'error'));
     } else if (data.type === 'play') player.play().catch(() => {});
     else if (data.type === 'pause') player.pause();
     else if (data.type === 'seek' && Math.abs(player.currentTime - data.time) > 1.5) player.currentTime = data.time;

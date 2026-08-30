@@ -4,5 +4,7 @@
   "interface_version": 1,
   "backend": "backend:create_source",
   "host_module": "host.mjs",
-  "python_dependencies": ["fastapi", "httpx"]
+  "python_dependencies": ["fastapi", "httpx"],
+  "host_capabilities": ["tools", "entity-inspector", "card-body-action", "title-action", "views"],
+  "views": [{"id": "cache-local", "label": "Cache local"}]
 }

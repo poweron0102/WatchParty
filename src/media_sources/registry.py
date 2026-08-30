@@ -97,9 +97,12 @@ def build_source_registry(configured_sources: object, plugin_catalog: PluginCata
         capabilities = ["browse", "search"]
         if getattr(source, "playback_available", source_type == "crunchyroll"):
             capabilities.append("playback")
+        host_capabilities = list(plugin.host_capabilities)
+        capabilities.extend(value for value in host_capabilities if value not in capabilities)
         if plugin.host_module is not None:
             capabilities.append("host-extension")
         summary = SourceSummary(source_id, label.strip(), tuple(capabilities), source_type,
-                                f"/host/{source_id}/module.js" if plugin.host_module else None)
+                                f"/host/{source_id}/module.js" if plugin.host_module else None,
+                                plugin.views, tuple(host_capabilities))
         entries.append(RegisteredSource(summary, source, plugin))
     return MediaSourceRegistry(entries, tuple(diagnostics))

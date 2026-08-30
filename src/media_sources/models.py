@@ -10,6 +10,34 @@ class EntryType(str, Enum):
     PLAYABLE = "playable"
 
 
+class EntityKind(str, Enum):
+    SERIES = "series"
+    SEASON = "season"
+    EPISODE = "episode"
+    MOVIE = "movie"
+    VIDEO = "video"
+
+
+class CatalogView(str, Enum):
+    POPULAR = "popular"
+    NEW = "new"
+    AZ = "az"
+    GENRES = "genres"
+    HISTORY = "history"
+    FAVORITES = "favorites"
+    LOCAL_CACHE = "cache-local"
+
+
+@dataclass(frozen=True)
+class CatalogEntity:
+    """Canonical identity used by host-owned features."""
+    source_id: str
+    entity_id: str
+    entity_kind: str
+    title: str
+    snapshot: dict | None = None
+
+
 @dataclass(frozen=True)
 class MediaResource:
     id: str
@@ -25,6 +53,8 @@ class SourceSummary:
     capabilities: tuple[str, ...] = ("browse", "stream")
     type: str | None = None
     host_module: str | None = None
+    views: tuple[dict, ...] = ()
+    host_capabilities: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -36,6 +66,7 @@ class CatalogEntry:
     image: MediaResource | None = None
     poster: MediaResource | None = None
     thumbnail: MediaResource | None = None
+    entity_kind: str | None = None
 
 
 @dataclass(frozen=True)

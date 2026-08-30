@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import ipaddress
 import os
@@ -20,7 +21,7 @@ from media_sources import (ByteRangeRequest, CollectionNotFound, InvalidByteRang
                            SourceReadError, SourceUnavailable)
 from rtc_config import build_rtc_config, managed_turn_server
 from server_setup import app
-from state import server_state
+from state import host_store, server_state
 from utils import get_public_ip
 from playback import PlaybackModule, PlaybackSelection, ResourceRequest
 from playback.models import (InvalidPlaybackResource, MaterializationTimeout, PlaybackExpired,
@@ -48,6 +49,41 @@ def _serialize_resource(source_id, resource):
     data = asdict(resource)
     data["url"] = _resource_url(source_id, resource.id, resource.revision)
     return data
+
+
+def _entity_kind(item):
+    if getattr(item, "entity_kind", None):
+        return item.entity_kind
+    if getattr(item, "id", "").startswith(("series:", "season:", "episode:", "movie:")):
+        return item.id.split(":", 1)[0]
+    return "video" if getattr(item, "entry_type", None) == "playable" else "collection"
+
+
+def _serialize_entry(source_id, item):
+    data = asdict(item)
+    for field in ("image", "poster", "thumbnail"):
+        data[field] = _serialize_resource(source_id, getattr(item, field))
+    data["entity_kind"] = _entity_kind(item)
+    data["source_id"] = source_id
+    data["favorited"] = host_store.is_favorite(source_id, item.id, data["entity_kind"])
+    return data
+
+
+def _snapshot_entry(source_id, item):
+    return {field: _serialize_resource(source_id, getattr(item, field))
+            for field in ("image", "poster", "thumbnail")}
+
+
+def _local_entry(source_id, row, *, favorite=False, history=None):
+    snapshot = row.get("snapshot") or {}
+    kind = row.get("entity_kind") or "video"
+    value = {"id": row["media_id"], "title": row["title"], "entry_type": "playable",
+             "media_kind": "video", "entity_kind": kind, "source_id": source_id,
+             "image": snapshot.get("image"), "poster": snapshot.get("poster"),
+             "thumbnail": snapshot.get("thumbnail"), "favorited": favorite}
+    if history is not None:
+        value["history"] = {key: history[key] for key in ("position", "duration", "completed", "last_played_at")}
+    return value
 
 
 def _media_error(exc: Exception):
@@ -196,18 +232,29 @@ async def source_host_action(request: Request, source_id: str, action: str):
 
 
 @app.get("/api/catalog")
-async def browse_catalog(source_id: str, parent_id: str | None = None, cursor: str | None = None):
+async def browse_catalog(source_id: str, parent_id: str | None = None, cursor: str | None = None,
+                         view: str | None = None):
+    if view in {"history", "favorites"}:
+        rows = host_store.history(source_id) if view == "history" else host_store.favorites(source_id)
+        items = [_local_entry(source_id, row, favorite=view == "favorites",
+                              history=row if view == "history" else None) for row in rows]
+        return {"items": items, "next_cursor": None, "view": view}
     try:
-        page = await MEDIA_SOURCES.get(source_id).browse(parent_id, cursor)
+        source = MEDIA_SOURCES.get(source_id)
+        browse_view = getattr(source, "browse_view", None)
+        if view == "cache-local" and browse_view is None:
+            raise CollectionNotFound("cache local indisponível para esta origem")
+        page = await browse_view(view, parent_id, cursor) if view and browse_view else await source.browse(parent_id, cursor)
     except Exception as exc:
         raise _media_error(exc) from exc
-    items = []
-    for item in page.items:
-        data = asdict(item)
-        for field in ("image", "poster", "thumbnail"):
-            data[field] = _serialize_resource(source_id, getattr(item, field))
-        items.append(data)
-    return {"items": items, "next_cursor": page.next_cursor}
+    items = [_serialize_entry(source_id, item) for item in page.items]
+    if view == "cache-local":
+        inventory = {row["media_id"]: row for row in await asyncio.to_thread(getattr(source, "cache").inventory)}
+        for item in items:
+            cached = inventory.get(item["id"])
+            if cached:
+                item["cache"] = {key: cached[key] for key in ("state", "coverage", "cached_bytes", "cached_count")}
+    return {"items": items, "next_cursor": page.next_cursor, "view": view or "catalog"}
 
 
 @app.get("/api/media")
@@ -223,7 +270,92 @@ async def get_media(source_id: str, media_id: str):
     for group in ("audio_tracks", "subtitles"):
         for track in data[group]:
             track["url"] = _resource_url(source_id, track["resource_id"])
+    data["source_id"] = source_id
+    data["entity_kind"] = media_id.split(":", 1)[0] if ":" in media_id else "video"
+    data["favorited"] = host_store.is_favorite(source_id, media_id, data["entity_kind"])
     return data
+
+
+@app.get("/api/history")
+async def get_history(source_id: str | None = None):
+    return {"items": host_store.history(source_id)}
+
+
+@app.post("/api/history")
+async def record_history_play(request: fastapi.Request, payload: dict):
+    _require_host_access(request)
+    required = ("source_id", "media_id", "entity_kind", "title")
+    if any(not isinstance(payload.get(key), str) or not payload[key] for key in required):
+        raise fastapi.HTTPException(422, "identidade de histórico inválida.")
+    try:
+        position = float(payload.get("position", 0))
+        duration = float(payload["duration"]) if payload.get("duration") is not None else None
+    except (TypeError, ValueError):
+        raise fastapi.HTTPException(422, "posição ou duração inválida.")
+    host_store.record_play(payload["source_id"], payload["media_id"], payload["entity_kind"],
+                           title=payload["title"], snapshot=payload.get("snapshot"),
+                           position=position, duration=duration)
+    return {"recorded": True}
+
+
+@app.get("/api/history/{source_id}/{media_id:path}/resume")
+async def get_history_resume(source_id: str, media_id: str, entity_kind: str | None = None):
+    return {"resume": host_store.resume(source_id, media_id, entity_kind)}
+
+
+@app.post("/api/history/checkpoint")
+async def save_history_checkpoint(request: fastapi.Request, payload: dict):
+    _require_host_access(request)
+    required = ("source_id", "media_id", "entity_kind", "position")
+    if any(not isinstance(payload.get(key), str) or not payload[key] for key in required[:3]):
+        raise fastapi.HTTPException(422, "identidade de mídia inválida.")
+    try:
+        position = float(payload["position"])
+        duration = float(payload["duration"]) if payload.get("duration") is not None else None
+    except (TypeError, ValueError):
+        raise fastapi.HTTPException(422, "posição ou duração inválida.")
+    host_store.checkpoint(payload["source_id"], payload["media_id"], payload["entity_kind"],
+                          position=position, duration=duration,
+                          completed=payload.get("completed"))
+    return {"saved": True}
+
+
+@app.delete("/api/history/{source_id}/{media_id:path}")
+async def delete_history(request: fastapi.Request, source_id: str, media_id: str, entity_kind: str | None = None):
+    _require_host_access(request)
+    host_store.remove_history(source_id, media_id, entity_kind)
+    return {"removed": True}
+
+
+@app.delete("/api/history")
+async def clear_history(request: fastapi.Request, source_id: str | None = None):
+    _require_host_access(request)
+    host_store.clear_history(source_id)
+    return {"cleared": True}
+
+
+@app.get("/api/favorites")
+async def get_favorites(source_id: str | None = None):
+    return {"items": host_store.favorites(source_id)}
+
+
+@app.api_route("/api/favorites", methods=["POST", "PUT"])
+async def set_favorite(request: fastapi.Request, payload: dict):
+    _require_host_access(request)
+    required = ("source_id", "media_id", "entity_kind", "title")
+    if any(not isinstance(payload.get(key), str) or not payload[key] for key in required):
+        raise fastapi.HTTPException(422, "snapshot de favorito inválido.")
+    value = host_store.toggle_favorite(payload["source_id"], payload["media_id"], payload["entity_kind"],
+                                       title=payload["title"], snapshot=payload.get("snapshot"),
+                                       favorite=payload.get("favorite"))
+    return {"favorited": value}
+
+
+@app.delete("/api/favorites/{source_id}/{media_id:path}")
+async def delete_favorite(request: fastapi.Request, source_id: str, media_id: str, entity_kind: str | None = None):
+    _require_host_access(request)
+    host_store.toggle_favorite(source_id, media_id, entity_kind or "video", title="", favorite=False)
+    return {"favorited": False}
 
 
 @app.get("/api/search")
@@ -234,10 +366,7 @@ async def search_catalog(source_id: str, q: str, cursor: str | None = None):
         raise _media_error(exc) from exc
     items = []
     for item in page.items:
-        data = asdict(item)
-        for field in ("image", "poster", "thumbnail"):
-            data[field] = _serialize_resource(source_id, getattr(item, field))
-        items.append(data)
+        items.append(_serialize_entry(source_id, item))
     return {"items": items, "next_cursor": page.next_cursor}
 
 

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from media_sources.models import MediaItem
+from media_sources.models import CatalogEntry, CatalogPage, EntryType, MediaItem
 from playback.models import (DemandPriority, OriginPresentation, OriginRepresentation, OriginTrack,
                              SegmentArtifact, SegmentDemand)
 
@@ -116,6 +116,62 @@ class ManagedCrunchyrollSource(CrunchyrollSource):
         page = await super().browse(parent_id, cursor)
         await asyncio.to_thread(self.cache.remember_catalog, parent_id, page.items)
         return page
+
+    async def browse_view(self, view, parent_id=None, cursor=None):
+        if view != "cache-local":
+            root = {"popular": "popular", "new": "new", "az": "az", "genres": "genres"}.get(view)
+            if root and parent_id is None:
+                parent_id = f"root:{root}"
+        if view != "cache-local":
+            return await self.browse(parent_id, cursor)
+
+        inventory = await asyncio.to_thread(self.cache.inventory)
+        cached = {row["media_id"]: row for row in inventory if row["state"] != "empty"}
+        with self.cache._connect() as db:
+            edges = [dict(row) for row in db.execute("SELECT parent_id,child_id,title,entry_type FROM catalog_edges")]
+        by_parent = {}
+        by_child = {}
+        for edge in edges:
+            by_parent.setdefault(edge["parent_id"], []).append(edge)
+            by_child.setdefault(edge["child_id"], []).append(edge)
+
+        def has_cached_descendant(node, seen=None):
+            seen = seen or set()
+            if node in seen: return False
+            seen.add(node)
+            return any(edge["child_id"] in cached or has_cached_descendant(edge["child_id"], seen)
+                       for edge in by_parent.get(node, []))
+
+        items = []
+        if parent_id == "cache-group:ungrouped":
+            known_children = {edge["child_id"] for edge in edges}
+            visible = {media_id: row for media_id, row in cached.items() if media_id not in known_children}
+        elif parent_id:
+            visible = {edge["child_id"]: cached[edge["child_id"]] for edge in by_parent.get(parent_id, [])
+                       if edge["child_id"] in cached}
+        else:
+            top_ids = {edge["child_id"] for edge in edges
+                       if edge["parent_id"].startswith("root:") or edge["parent_id"] == "__root__"}
+            visible = {media_id: row for media_id, row in cached.items()
+                       if media_id not in {edge["child_id"] for edge in edges} or media_id in top_ids}
+        for media_id, row in visible.items():
+            kind = media_id.split(":", 1)[0] if ":" in media_id else "video"
+            if kind in {"episode", "movie", "video"}:
+                items.append(CatalogEntry(media_id, row["title"], EntryType.PLAYABLE, "video", entity_kind=kind))
+
+        collections = {}
+        candidates = by_parent.get(parent_id, []) if parent_id and parent_id != "cache-group:ungrouped" else edges
+        if parent_id is None:
+            candidates = [edge for edge in edges if edge["parent_id"].startswith("root:")]
+        for edge in candidates:
+            child = edge["child_id"]
+            if edge["entry_type"] == EntryType.COLLECTION.value and has_cached_descendant(child):
+                collections[child] = CatalogEntry(child, edge["title"], EntryType.COLLECTION,
+                                                   entity_kind=child.split(":", 1)[0])
+        if parent_id is None and any(media_id not in {edge["child_id"] for edge in edges} for media_id in cached):
+            collections["cache-group:ungrouped"] = CatalogEntry("cache-group:ungrouped", "Sem agrupamento",
+                                                                 EntryType.COLLECTION, entity_kind="group")
+        return CatalogPage(tuple(sorted((*collections.values(), *items), key=lambda item: item.title.casefold())))
 
     async def inspect(self, media_id):
         presentation = await asyncio.to_thread(self.cache.load_presentation, media_id)
@@ -224,6 +280,23 @@ class ManagedCrunchyrollSource(CrunchyrollSource):
         async def runner(job): await self._complete(job, media_id, payload)
         return self.jobs.start("download", runner)
 
+    def _start_batch(self, media_ids, payload, export=False):
+        async def runner(job):
+            job.progress(0, len(media_ids), "Processando lote")
+            for index, media_id in enumerate(media_ids, 1):
+                try:
+                    if export:
+                        await self._export(job, media_id, payload)
+                    else:
+                        await self._complete(job, media_id, payload)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    safe = re.sub(r"https?://\\S+", "<url>", str(exc))[:500]
+                    job.add_failure(media_id, "export" if export else "download", safe)
+                job.progress(index, len(media_ids), f"{index}/{len(media_ids)} episódio(s)")
+        return self.jobs.start("batch-export" if export else "batch-download", runner)
+
     async def _write_input(self, media_id, track, rep, target):
         demands = [SegmentDemand(track.id, rep.id, rep.initialization), *(SegmentDemand(track.id, rep.id, segment.identity) for segment in rep.segments)]
         artifacts = [self.locate(media_id, demand) for demand in demands]
@@ -324,10 +397,32 @@ class ManagedCrunchyrollSource(CrunchyrollSource):
 
     async def handle_host_action(self, action, request):
         if action == "cache" and request.method == "GET":
-            return {"media": await asyncio.to_thread(self.cache.inventory), "jobs": self.jobs.list(),
+            media = await asyncio.to_thread(self.cache.inventory)
+            return {"media": media, "storage": {"cached_bytes": sum(value["cached_bytes"] for value in media),
+                                                   "media_count": len(media),
+                                                   "export_count": sum(len(value["exports"]) for value in media)},
+                    "jobs": self.jobs.list(),
                     "defaults": {"audio_languages": self.options.get("audio_languages", []),
                                  "subtitle_languages": self.options.get("subtitle_languages", []),
                                  "video_quality": self.options.get("video_quality")}}
+        if action == "preferences" and request.method == "GET":
+            return {"audio_languages": self.options.get("audio_languages", []),
+                    "subtitle_languages": self.options.get("subtitle_languages", []),
+                    "video_quality": self.options.get("video_quality"),
+                    "audio_quality": self.options.get("audio_quality")}
+        if action == "preferences" and request.method == "PUT":
+            payload = await request.json()
+            for key in ("audio_languages", "subtitle_languages"):
+                if key in payload and (not isinstance(payload[key], list) or any(not isinstance(value, str) or not value.strip() for value in payload[key])):
+                    raise HTTPException(422, f"{key} inválido")
+            for key in ("audio_languages", "subtitle_languages", "video_quality", "audio_quality"):
+                if key in payload: self.options[key] = payload[key]
+            return {key: self.options.get(key) for key in ("audio_languages", "subtitle_languages", "video_quality", "audio_quality")}
+        if action == "catalog/refresh" and request.method == "POST":
+            for path in self._metadata.glob("*.json"):
+                try: path.unlink()
+                except OSError: pass
+            return {"refreshed": True}
         if action == "presentation" and request.method == "GET":
             media_id = request.query_params.get("media_id", "")
             return self._presentation_data(await self.inspect(media_id))
@@ -340,8 +435,22 @@ class ManagedCrunchyrollSource(CrunchyrollSource):
             if not media_id: raise HTTPException(422, "media_id é obrigatório")
             job = self.jobs.start("export-mp4", lambda value: self._export(value, media_id, payload))
             return {"job": job.view()}
+        if action == "download-export" and request.method == "POST":
+            payload = await request.json(); media_id = str(payload.get("media_id", ""))
+            if not media_id: raise HTTPException(422, "media_id é obrigatório")
+            job = self.jobs.start("download-export", lambda value: self._export(value, media_id, payload))
+            return {"job": job.view()}
+        if action in {"batch-download", "batch-download-export"} and request.method == "POST":
+            payload = await request.json(); raw_ids = payload.get("media_ids")
+            if not isinstance(raw_ids, list) or not raw_ids or any(not isinstance(value, str) or not value for value in raw_ids):
+                raise HTTPException(422, "media_ids deve ser uma lista não vazia")
+            unique_ids = list(dict.fromkeys(raw_ids))
+            return {"job": self._start_batch(unique_ids, payload, action.endswith("export")).view()}
         if action == "subtitles/upload" and request.method == "POST": return await self._upload_subtitle(request)
         if action == "jobs" and request.method == "GET": return {"jobs": self.jobs.list()}
+        if action == "jobs/report" and request.method == "GET":
+            return {"jobs": [{"id": job["id"], "kind": job["kind"], "state": job["state"], "failures": job["failures"]}
+                            for job in self.jobs.list() if job["failures"]]}
         if action.startswith("jobs/"):
             parts = action.split("/")
             if len(parts) == 2 and request.method == "GET": return {"job": self.jobs.get(parts[1]).view()}

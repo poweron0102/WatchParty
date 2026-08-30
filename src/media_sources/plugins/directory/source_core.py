@@ -114,11 +114,12 @@ class DirectorySource:
             if resolved.is_dir():
                 poster, thumbnail = self._collection_images(resolved)
                 collections.append(CatalogEntry(self._id(resolved), child.name, EntryType.COLLECTION,
-                                                image=poster or thumbnail, poster=poster, thumbnail=thumbnail))
+                                                image=poster or thumbnail, poster=poster, thumbnail=thumbnail,
+                                                entity_kind="collection"))
             elif resolved.is_file() and resolved.suffix.lower() in VIDEO_EXTENSIONS:
                 poster, thumbnail = self._video_images(resolved)
                 playable.append(CatalogEntry(self._id(resolved), child.name, EntryType.PLAYABLE,
-                                             "video", thumbnail or poster, poster, thumbnail))
+                                             "video", thumbnail or poster, poster, thumbnail, "video"))
         key = lambda item: item.title.casefold()
         return CatalogPage(tuple(sorted(collections, key=key) + sorted(playable, key=key)))
 
@@ -135,7 +136,7 @@ class DirectorySource:
                 if any(part.startswith(".") for part in path.relative_to(self._root).parts): continue
                 if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS and needle in path.name.casefold():
                     poster, thumbnail = self._video_images(path)
-                    items.append(CatalogEntry(self._id(path), path.name, EntryType.PLAYABLE, "video", thumbnail or poster, poster, thumbnail))
+                    items.append(CatalogEntry(self._id(path), path.name, EntryType.PLAYABLE, "video", thumbnail or poster, poster, thumbnail, "video"))
         except OSError as exc:
             raise SourceUnavailable("origem temporariamente indisponível") from exc
         return CatalogPage(tuple(sorted(items, key=lambda item: item.title.casefold())))
