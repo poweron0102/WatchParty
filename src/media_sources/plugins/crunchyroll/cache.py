@@ -350,14 +350,7 @@ class CrunchyrollCache:
                                      "coverage": ready["count"] / rep["segment_count"] if rep["segment_count"] else 0})
                     tracks.append({**dict(track), "representations": reps})
                 exports = [dict(row) for row in db.execute("SELECT * FROM exports WHERE media_id=? ORDER BY created_at DESC", (media["media_id"],))]
-                valid_export = any(self._valid_export(row) for row in exports)
-                canonical_complete = False; audio_complete = False
-                for track in tracks:
-                    for rep in track["representations"]:
-                        if track["kind"] == "video" and rep["rep_id"] == media["canonical_representation"] and rep["coverage"] >= 1:
-                            canonical_complete = True
-                        if track["kind"] == "audio" and rep["coverage"] >= 1: audio_complete = True
-                state = "exported" if valid_export else ("offline" if canonical_complete and audio_complete else ("partial" if cached["count"] else "empty"))
+                state = self._media_state(db, media)
                 result.append({**dict(media), "cached_count": cached["count"], "cached_bytes": cached["bytes"],
                                "coverage": cached["count"] / plan if plan else 0, "state": state,
                                "tracks": tracks, "exports": exports})
@@ -387,8 +380,60 @@ class CrunchyrollCache:
         if representation_id is not None:
             query += " AND r.rep_id=?"
             params.append(representation_id)
-        query += " GROUP BY r.track_id,r.rep_id,r.segment_count"
+        # segment_count 0 significa plano desconhecido, nao "nada a baixar":
+        # sem esta guarda, `cached >= segment_count` daria 0 >= 0 e uma midia
+        # sem plano seria declarada completa.
+        query += " AND r.segment_count > 0 GROUP BY r.track_id,r.rep_id,r.segment_count"
         return any(row["cached"] >= row["segment_count"] for row in db.execute(query, params))
+
+    def _media_state(self, db, media_row) -> str:
+        """`empty` | `partial` | `offline` | `exported` para uma midia.
+
+        Definicao unica: o inventario completo e o resumo por colecao chegavam
+        ao mesmo rotulo por caminhos diferentes, que e como duas telas passam
+        a discordar sobre a mesma midia.
+        """
+        media_id, revision = media_row["media_id"], media_row["revision"]
+        exports = db.execute("SELECT * FROM exports WHERE media_id=?", (media_id,)).fetchall()
+        if any(self._valid_export(row) for row in exports):
+            return "exported"
+        video_complete = self._has_complete_representation(
+            db, media_id, revision, "video", media_row["canonical_representation"])
+        audio_complete = self._has_complete_representation(db, media_id, revision, "audio")
+        if video_complete and audio_complete:
+            return "offline"
+        cached = db.execute("SELECT COUNT(*) count FROM segments WHERE media_id=? AND revision=?",
+                            (media_id, revision)).fetchone()["count"]
+        return "partial" if cached else "empty"
+
+    def collection_summary(self, parent_id: str):
+        """Estado de cache agregado dos episodios sob `parent_id`.
+
+        Existe porque o Inspetor de uma serie precisa falar da serie aberta.
+        Antes, o plugin pedia o inventario inteiro e filtrava por
+        `media_id.startsWith('episode:')` -- ou seja, contava TODOS os
+        episodios em cache de TODAS as series, e mostrava esse numero como se
+        fosse da entidade aberta.  A hierarquia mora no banco; o prefixo do id
+        nunca soube quem e filho de quem.
+        """
+        media_ids = self.descendants(str(parent_id or ""))
+        counts = {"empty": 0, "partial": 0, "offline": 0, "exported": 0}
+        cached_bytes = 0
+        if not media_ids:
+            return {"total": 0, "known": 0, "cached_bytes": 0, **counts}
+        with self._connect() as db:
+            placeholders = ",".join("?" for _ in media_ids)
+            rows = db.execute(f"SELECT * FROM media WHERE media_id IN ({placeholders})", media_ids).fetchall()
+            for row in rows:
+                counts[self._media_state(db, row)] += 1
+                cached_bytes += db.execute(
+                    "SELECT COALESCE(SUM(size),0) bytes FROM segments WHERE media_id=? AND revision=?",
+                    (row["media_id"], row["revision"])).fetchone()["bytes"]
+        # `total` conta os episodios da colecao; `known` so os que o cache ja
+        # viu.  A diferenca sao os que nunca foram tocados -- que continuam
+        # sendo "sem cache", e por isso entram em `empty`.
+        counts["empty"] += len(media_ids) - len(rows)
+        return {"total": len(media_ids), "known": len(rows), "cached_bytes": cached_bytes, **counts}
 
     def cleanup_preview(self, filters: dict):
         mode = filters.get("mode", "all"); params: list[object] = []
@@ -461,13 +506,24 @@ class CrunchyrollCache:
         for path in self.segments.rglob("*"):
             if path.is_file() and str(path.resolve()) not in known and str(path.resolve()) not in leased:
                 paths.append(path)
-        return {"count": len(paths), "bytes": sum(path.stat().st_size for path in paths), "paths": [str(path) for path in paths]}
+        # Mesma forma de cleanup_preview: a UI le os dois pelo mesmo caminho, e
+        # `media` vazio e a resposta honesta -- orfao e justamente o arquivo
+        # que nenhuma midia reivindica.
+        return {"count": len(paths), "bytes": sum(path.stat().st_size for path in paths),
+                "media": [], "paths": [str(path) for path in paths]}
 
     def remove_orphans(self):
-        removed = 0
+        removed = skipped = bytes_removed = 0
         with self._lock:
             preview = self.orphan_preview()
             for value in preview["paths"]:
-                try: Path(value).unlink(); removed += 1
-                except OSError: pass
-        return {"removed": removed, "bytes": preview["bytes"]}
+                path = Path(value)
+                try:
+                    size = path.stat().st_size
+                    path.unlink()
+                    removed += 1; bytes_removed += size
+                except OSError:
+                    skipped += 1
+        # `bytes` era o total previsto, nao o recuperado: um arquivo travado
+        # entrava na conta como se tivesse sido apagado.
+        return {"removed": removed, "skipped": skipped, "bytes": bytes_removed}

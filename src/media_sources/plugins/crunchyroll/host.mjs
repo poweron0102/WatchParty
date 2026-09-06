@@ -211,11 +211,15 @@ export async function mountInspector(context) {
       save.onclick = () => start('export-mp4');
       downloadSave.onclick = () => start('download-export');
     } else {
-      const inventory = await context.request('cache');
-      const related = inventory.media?.filter(value => value.media_id.startsWith('episode:')) || [];
-      const complete = related.filter(value => value.state === 'offline' || value.state === 'exported').length;
-      const partial = related.filter(value => value.state === 'partial').length;
-      status.textContent = `Cache agregado · ${complete} completo(s) · ${partial} parcial(is) · ${related.length} episódio(s)`;
+      // O agregado vem do backend, escopado por parent_id.  Antes era feito
+      // aqui com `media_id.startsWith('episode:')` sobre o inventario inteiro,
+      // o que contava os episodios de TODAS as series e exibia o numero como
+      // se fosse desta.  A hierarquia mora no banco.
+      const summary = await context.request(`cache/summary?${new URLSearchParams({ parent_id: item.id })}`);
+      const complete = summary.offline + summary.exported;
+      status.textContent = summary.total
+        ? `${complete} baixado(s) · ${summary.partial} parcial(is) · ${summary.empty} sem cache · ${summary.total} episódio(s)`
+        : 'Nenhum episódio catalogado nesta coleção.';
       download.disabled = true; save.disabled = true; downloadSave.disabled = true;
     }
   } catch (error) { status.textContent = error.message || 'Disponibilidade desatualizada (offline).'; }

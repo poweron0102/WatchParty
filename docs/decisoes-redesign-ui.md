@@ -307,3 +307,68 @@ O teste central extrai as chaves que o host monta em cada painel e as chamadas
 `context.X` de cada plugin, **por painel**, e exige que uma esteja contida na
 outra. Comparar contra a união dos dois deixaria passar justamente o erro que
 interessa — usar no Inspetor algo que só as Ferramentas têm.
+
+## Etapa 7 — correções de backend
+
+### Duas das três já estavam feitas no backend
+
+O plano listava três correções. Ao abrir o código, `skipped` **já era**
+devolvido por `cache.cleanup`, e as falhas detalhadas **já estavam** em
+`job.view()` e em `jobs/report`. Quem as descartava era a UI: o botão
+"Relatório de falhas" faz `reduce(...)` sobre `job.failures` e mostra só a
+contagem.
+
+Isso não é uma correção de backend — é a etapa 8. Corrigir aqui seria mexer em
+código que já estava certo.
+
+### O bug real: o agregado de série/temporada
+
+`crunchyroll/host.mjs` montava o agregado no navegador filtrando o inventário
+inteiro por `media_id.startsWith('episode:')`. Isso contava os episódios em
+cache de **todas** as séries e exibia o número como se fosse o da entidade
+aberta. O prefixo do id nunca soube quem é filho de quem; a hierarquia sempre
+esteve em `catalog_edges`.
+
+Entrou `cache.collection_summary(parent_id)`, exposto em
+`GET cache/summary?parent_id=`, que resolve os descendentes no banco (o mesmo
+`descendants()` que a limpeza por coleção já usava) e conta os estados.
+
+Um detalhe que o agregado antigo também errava: episódio que o cache nunca
+tocou não aparecia em lugar nenhum. Agora entra em `empty`, e
+`empty + partial + offline + exported == total` fecha sempre.
+
+### Uma definição de "estado", não duas
+
+`inventory()` decidia `offline` percorrendo as representações em Python;
+`cleanup_preview` decidia "completo" com `_has_complete_representation` em SQL.
+Dois caminhos para o mesmo rótulo é como duas telas passam a discordar sobre a
+mesma mídia. Agora existe `_media_state(db, row)`, e os três chamam ele.
+
+A unificação expôs uma divergência real: `_has_complete_representation` tratava
+`segment_count = 0` como completo (`0 >= 0`), enquanto `inventory()` tratava
+como incompleto. Plano desconhecido não é "nada a baixar" — a query passou a
+exigir `segment_count > 0`.
+
+### Consistência de forma
+
+- `remove_orphans` devolvia `{removed, bytes}`. Agora devolve `skipped`
+  também — e `bytes` passou a ser o **recuperado de verdade**: antes vinha do
+  preview, então um arquivo travado entrava na conta como se tivesse sido
+  apagado.
+- `orphan_preview` não devolvia `media`, embora a UI leia `result.media?.length`
+  pelo mesmo caminho das outras limpezas. Agora devolve `[]`, que é a resposta
+  honesta: órfão é justamente o arquivo que nenhuma mídia reivindica.
+- A ação `cache` devolvia `defaults` sem `audio_quality`, embora `preferences`
+  o tivesse e o formulário do painel precise dele.
+
+### Testes
+
+Quatro em `test_crunchyroll_cache.py`, sobre duas séries com episódios
+distintos: o agregado conta só a coleção aberta, episódio nunca tocado conta
+como sem cache, coleção desconhecida devolve vazio em vez de erro, e o resumo
+concorda com o inventário sobre a mesma mídia.
+
+Dois em `test_plugin_contract.py`: nenhum plugin deduz parentesco de prefixo de
+id, e **toda ação que um plugin pede existe no backend dele** — o host
+encaminha `/host/{id}/{action}` às cegas, então um typo em nome de rota vira
+404 e "Ação da origem falhou" sem dizer qual.

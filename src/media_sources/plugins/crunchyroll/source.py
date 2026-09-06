@@ -450,9 +450,17 @@ class ManagedCrunchyrollSource(CrunchyrollSource):
                                                    "media_count": len(media),
                                                    "export_count": sum(len(value["exports"]) for value in media)},
                     "jobs": self.jobs.list(),
+                    # Mesmas chaves que a acao `preferences` devolve: o painel
+                    # le os padroes daqui e escrevia num formulario que tinha
+                    # um campo a mais do que este dicionario entregava.
                     "defaults": {"audio_languages": self.options.get("audio_languages", []),
                                  "subtitle_languages": self.options.get("subtitle_languages", []),
-                                 "video_quality": self.options.get("video_quality")}}
+                                 "video_quality": self.options.get("video_quality"),
+                                 "audio_quality": self.options.get("audio_quality")}}
+        if action == "cache/summary" and request.method == "GET":
+            parent_id = request.query_params.get("parent_id", "")
+            if not parent_id: raise HTTPException(422, "parent_id é obrigatório")
+            return await asyncio.to_thread(self.cache.collection_summary, parent_id)
         if action == "preferences" and request.method == "GET":
             return {"audio_languages": self.options.get("audio_languages", []),
                     "subtitle_languages": self.options.get("subtitle_languages", []),

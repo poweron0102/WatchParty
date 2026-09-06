@@ -137,6 +137,77 @@ class ContextSurfaceTests(unittest.TestCase):
                 self.assertIn(f"context.{name}" if name != "catalogRendered" else name, text)
 
 
+def plugin_requested_actions(source):
+    """Acoes que o plugin pede via ``context.request(...)``, sem query string.
+
+    Interpolacao vira `*`: `jobs/${job.id}/pause` nao pode ser comparado
+    literalmente, mas o prefixo ainda diz qual rota e.
+    """
+    found = set()
+    for match in re.findall(r"""context\.request\(\s*['"`]([^'"`]*)['"`]""", source):
+        found.add(match.split("?", 1)[0])
+    for match in re.findall(r"""context\.request\(\s*`([^`]*)`""", source):
+        found.add(re.sub(r"\$\{[^}]*\}", "*", match).split("?", 1)[0])
+    return {action for action in found if action}
+
+
+def backend_actions(path):
+    """Acoes que o backend do plugin atende."""
+    text = path.read_text(encoding="utf-8")
+    exact = set(re.findall(r"""action == ["']([^"']+)["']""", text))
+    for group in re.findall(r"""action in \{([^}]+)\}""", text):
+        exact.update(re.findall(r"""["']([^"']+)["']""", group))
+    prefixes = set(re.findall(r"""action\.startswith\(["']([^"']+)["']""", text))
+    return exact, prefixes
+
+
+class RequestedRouteTests(unittest.TestCase):
+    """Toda acao que um plugin pede tem que existir no backend dele.
+
+    O host encaminha `/host/{source_id}/{action}` as cegas: se o nome nao
+    casar, o backend devolve 404 e o painel mostra "Acao da origem falhou"
+    sem dizer qual.  Um typo em nome de rota nao tem outro guarda.
+    """
+
+    BACKENDS = {"crunchyroll": "source.py", "directory": "backend.py"}
+
+    def test_every_action_a_plugin_requests_is_served_by_its_backend(self):
+        for module in PLUGIN_MODULES:
+            name = module.parent.name
+            exact, prefixes = backend_actions(module.parent / self.BACKENDS[name])
+            for action in sorted(plugin_requested_actions(module.read_text(encoding="utf-8"))):
+                with self.subTest(plugin=name, action=action):
+                    served = action in exact or any(action.startswith(prefix) for prefix in prefixes)
+                    self.assertTrue(served, f"{name} pede '{action}', que o backend nao atende")
+
+    def test_the_collection_summary_route_exists(self):
+        exact, _ = backend_actions(PLUGINS / "crunchyroll" / "source.py")
+        self.assertIn("cache/summary", exact)
+
+
+class HierarchyTests(unittest.TestCase):
+    """Parentesco vem do banco, nunca do prefixo do id.
+
+    O agregado de serie/temporada era montado no navegador filtrando o
+    inventario inteiro por ``media_id.startsWith('episode:')``: contava os
+    episodios de TODAS as series e exibia o numero como se fosse o da
+    entidade aberta.
+    """
+
+    def test_no_plugin_infers_parentage_from_an_id_prefix(self):
+        for module in PLUGIN_MODULES:
+            # Comentario que *descreve* o defeito nao e o defeito -- e a
+            # explicacao de por que a rota existe.
+            code = re.sub(r"//[^\n]*|/\*.*?\*/", " ", module.read_text(encoding="utf-8"), flags=re.S)
+            with self.subTest(plugin=module.parent.name):
+                # Busca manual: assertNotRegex despejaria o arquivo inteiro.
+                if re.search(r"""startsWith\(\s*['"](episode|season|series|movie):""", code):
+                    self.fail(
+                        f"{module.parent.name} deduz parentesco do prefixo do id; "
+                        "use cache/summary?parent_id=, que resolve a hierarquia no banco"
+                    )
+
+
 class CatalogRenderedDispatchTests(unittest.TestCase):
     """O hook existia dos dois lados e mesmo assim nunca disparava.
 
