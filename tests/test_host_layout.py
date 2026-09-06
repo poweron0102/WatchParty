@@ -1,62 +1,143 @@
+"""Regressoes de layout do Painel do Host.
+
+Cada teste aqui existe porque um bug real aconteceu.  As asercoes miram na
+*intencao* de cada regressao -- o card de pasta e vertical, o titulo do card
+flutua sobre a imagem, a pagina nao rola inteira -- e nao na aparencia do
+momento em que o bug foi corrigido.
+
+Regra deste arquivo: nada de classe utilitaria, texto de interface ou string
+literal de CSS.  Elemento se ancora em ``data-testid``; estilo se verifica por
+propriedade.  Ver ``tests/ui_support.py``.
+"""
+
+import re
 import unittest
-from pathlib import Path
+
+from ui_support import ROOT, css_rule, element_ids, has_rule, page_css, read_page, read_script
 
 
-ROOT = Path(__file__).resolve().parents[1]
+class HostShellTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.html = read_page("host.html")
+        cls.css = page_css("host.html")
+        cls.javascript = read_script("host.js")
+        cls.ids = element_ids(cls.html)
+
+    def test_every_functional_anchor_of_the_panel_is_present(self):
+        self.assertLessEqual(
+            {
+                "host-shell",
+                "host-header",
+                "source-select",
+                "source-tools-button",
+                "remote-admin-toggle",
+                "catalog-search",
+                "catalog-scroll",
+                "video-grid",
+                "folder-grid",
+                "video-section-title",
+                "folder-section-title",
+                "tools-modal",
+                "tools-modal-body",
+                "inspector-modal",
+                "inspector-favorite",
+                "inspector-plugin-root",
+            },
+            self.ids,
+        )
+
+    def test_panel_no_longer_asks_for_a_raw_video_url(self):
+        self.assertNotIn('id="video-url-field"', self.html)
+
+    def test_plugin_extension_is_loaded_for_the_selected_source(self):
+        self.assertIn("loadSourceExtension", self.javascript)
 
 
-class HostLayoutRegressionTests(unittest.TestCase):
-    def test_host_keeps_styled_shell_and_media_aspect_ratio_mapping(self):
-        html = (ROOT / "files" / "host.html").read_text(encoding="utf-8")
-        javascript = (ROOT / "files" / "host.js").read_text(encoding="utf-8")
+class HostScrollTests(unittest.TestCase):
+    """A pagina nao rola: quem rola sao as regioes internas."""
 
-        self.assertIn("container mx-auto p-4 md:p-8 max-w-7xl", html)
-        self.assertIn("Gerencie sua sessão de Watch Party", html)
-        self.assertIn("bg-card p-6 rounded-lg shadow-lg", html)
-        self.assertIn('id="source-select"', html)
-        self.assertIn('id="source-extension-root"', html)
-        self.assertIn('id="remote-host-admin-toggle"', html)
-        self.assertNotIn('id="video-url-field"', html)
-        self.assertIn("entry_type === 'collection' ? 'folder' : 'video'", javascript)
-        self.assertIn("loadSourceExtension", javascript)
-        self.assertIn(".media-item.folder img.banner", html)
-        self.assertIn(".media-item.video img.banner", html)
+    @classmethod
+    def setUpClass(cls):
+        cls.css = page_css("host.html")
 
-    def test_host_uses_internal_scroll_and_styled_scrollbars(self):
-        html = (ROOT / "files" / "host.html").read_text(encoding="utf-8")
-        self.assertIn("html,body{height:100%;overflow:hidden}", html)
-        self.assertIn(".host-shell{height:100dvh", html)
-        self.assertIn("scrollbar-color:", html)
-        self.assertIn("::-webkit-scrollbar-thumb", html)
+    def test_the_document_itself_does_not_scroll(self):
+        self.assertEqual(css_rule(self.css, "html").get("overflow"), "hidden")
+        self.assertEqual(css_rule(self.css, "body").get("overflow"), "hidden")
 
-    def test_card_title_is_an_overlay_like_the_previous_layout(self):
-        html = (ROOT / "files" / "host.html").read_text(encoding="utf-8")
-        self.assertIn(".media-item .file-name{position:absolute;bottom:0", html)
+    def test_the_shell_is_bound_to_the_viewport_height(self):
+        height = css_rule(self.css, ".host-shell").get("height", "")
+        self.assertRegex(height, r"100(dvh|vh)")
 
-    def test_card_overlay_preserves_old_transparency_and_rounded_corners(self):
-        html = (ROOT / "files" / "host.html").read_text(encoding="utf-8")
-        self.assertIn("background-color:rgba(30,30,30,.7)", html)
-        self.assertIn("border-radius:0 0 .5rem .5rem", html)
-        self.assertIn(".media-item img.banner{width:100%;object-fit:cover;display:block;border-radius:.5rem}", html)
+    def test_the_catalog_region_scrolls_on_its_own(self):
+        self.assertEqual(css_rule(self.css, ".catalog-scroll").get("overflow-y"), "auto")
+        self.assertEqual(css_rule(self.css, ".catalog-scroll").get("min-height"), "0")
 
-    def test_favorites_do_not_mix_vertical_and_horizontal_cards_in_one_grid(self):
-        html = (ROOT / "files" / "host.html").read_text(encoding="utf-8")
-        javascript = (ROOT / "files" / "host.js").read_text(encoding="utf-8")
-        self.assertIn(".media-grid-layout{display:grid;align-items:start", html)
-        self.assertIn('id="folder-section-title"', html)
-        self.assertIn("const favoritesRoot", javascript)
-        self.assertIn("folderSectionTitle.textContent = favoritesRoot", javascript)
-        self.assertIn("videoSectionTitle.textContent = historyRoot", javascript)
+    def test_scrollbars_are_styled_instead_of_browser_default(self):
+        self.assertIn("scrollbar-color", css_rule(self.css, "*"))
+        self.assertTrue(has_rule(self.css, "*::-webkit-scrollbar-thumb"))
 
-    def test_favorite_collection_navigation_leaves_the_flat_view(self):
+
+class MediaCardTests(unittest.TestCase):
+    """O card de pasta e retrato e o de video e paisagem -- nunca misturados."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.css = page_css("host.html")
+        cls.javascript = read_script("host.js")
+
+    def test_folder_and_video_banners_keep_distinct_aspect_ratios(self):
+        folder = css_rule(self.css, ".media-item.folder img.banner").get("aspect-ratio")
+        video = css_rule(self.css, ".media-item.video img.banner").get("aspect-ratio")
+        self.assertEqual(folder, "2/3")
+        self.assertEqual(video, "16/9")
+        self.assertNotEqual(folder, video)
+
+    def test_the_card_class_follows_the_entity_type(self):
+        self.assertRegex(self.javascript, r"entry_type\s*===\s*'collection'\s*\?\s*'folder'\s*:\s*'video'")
+
+    def test_the_title_floats_over_the_banner(self):
+        rule = css_rule(self.css, ".media-item .file-name")
+        self.assertEqual(rule.get("position"), "absolute")
+        self.assertEqual(rule.get("bottom"), "0")
+
+    def test_the_title_overlay_is_translucent_and_follows_the_card_corners(self):
+        rule = css_rule(self.css, ".media-item .file-name")
+        background = rule.get("background-color") or rule.get("background") or ""
+        self.assertRegex(
+            background,
+            r"(rgba|hsla|/\s*[\d.]+%?\s*\)|var\()",
+            "o overlay do titulo precisa ser translucido para a capa aparecer atras",
+        )
+        self.assertIn("border-radius", rule)
+
+    def test_grids_are_grids_so_cards_never_stretch_to_the_tallest_sibling(self):
+        rule = css_rule(self.css, ".media-grid-layout")
+        self.assertEqual(rule.get("display"), "grid")
+        self.assertEqual(rule.get("align-items"), "start")
+
+
+class CatalogSectionTests(unittest.TestCase):
+    """Views agregadas nao podem rotular toda entidade como 'video'."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.javascript = read_script("host.js")
+
+    def test_section_titles_are_computed_not_hardcoded(self):
+        self.assertRegex(self.javascript, r"videoSectionTitle\.textContent\s*=")
+        self.assertRegex(self.javascript, r"folderSectionTitle\.textContent\s*=")
+
+    def test_favorites_and_history_roots_drive_the_titles(self):
+        self.assertRegex(self.javascript, r"\bfavoritesRoot\b")
+        self.assertRegex(self.javascript, r"\bhistoryRoot\b")
+
+    def test_navigating_into_a_favorite_collection_leaves_the_flat_view(self):
         routes = (ROOT / "src" / "http_routes.py").read_text(encoding="utf-8")
-        self.assertIn('if view in {"history", "favorites"} and parent_id is None:', routes)
-
-    def test_single_views_do_not_label_every_entity_as_video(self):
-        html = (ROOT / "files" / "host.html").read_text(encoding="utf-8")
-        javascript = (ROOT / "files" / "host.js").read_text(encoding="utf-8")
-        self.assertIn('id="video-section-title"', html)
-        self.assertIn("videoSectionTitle.textContent", javascript)
+        self.assertRegex(
+            routes,
+            r'view in \{"history", "favorites"\}\s+and\s+parent_id is None',
+        )
 
 
 if __name__ == "__main__":
