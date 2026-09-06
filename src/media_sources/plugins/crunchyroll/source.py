@@ -452,7 +452,8 @@ class ManagedCrunchyrollSource(CrunchyrollSource):
                     "jobs": self.jobs.list(),
                     "defaults": {"audio_languages": self.options.get("audio_languages", []),
                                  "subtitle_languages": self.options.get("subtitle_languages", []),
-                                 "video_quality": self.options.get("video_quality")}}
+                                 "video_quality": self.options.get("video_quality"),
+                                 "audio_quality": self.options.get("audio_quality")}}
         if action == "preferences" and request.method == "GET":
             return {"audio_languages": self.options.get("audio_languages", []),
                     "subtitle_languages": self.options.get("subtitle_languages", []),
@@ -474,6 +475,13 @@ class ManagedCrunchyrollSource(CrunchyrollSource):
         if action == "presentation" and request.method == "GET":
             media_id = request.query_params.get("media_id", "")
             return self._presentation_data(await self.inspect(media_id))
+        if action == "collection-summary" and request.method == "GET":
+            parent_id = request.query_params.get("parent_id", "")
+            if not parent_id:
+                raise HTTPException(422, "parent_id é obrigatório")
+            descendants = set(await asyncio.to_thread(self.cache.descendants, parent_id))
+            media = await asyncio.to_thread(self.cache.inventory)
+            return {"media": [item for item in media if item["media_id"] in descendants]}
         if action == "download" and request.method == "POST":
             payload = await request.json(); media_id = str(payload.get("media_id", ""))
             if not media_id: raise HTTPException(422, "media_id é obrigatório")

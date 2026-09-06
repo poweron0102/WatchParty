@@ -38,6 +38,7 @@ let pageIndex = 0;
 let pageCursors = [null];
 let nextCursor = null;
 let paginationLoader = null;
+let modalReturnFocus = null;
 
 const nativeViews = [
     ['popular', 'Popular'], ['new', 'Novidades'], ['az', 'A-Z'],
@@ -83,7 +84,12 @@ async function toggleFavorite(item, input = null) {
     const kind = entityKind(item);
     const previous = item.favorited;
     item.favorited = !previous;
-    if (input) input.checked = item.favorited;
+    if (input) {
+        if ('checked' in input) input.checked = item.favorited;
+        input.setAttribute('aria-pressed', String(item.favorited));
+        input.setAttribute('aria-label', item.favorited ? 'Desfavoritar' : 'Favoritar');
+        if (input.classList.contains('inspector-favorite')) input.firstChild.textContent = item.favorited ? '★ ' : '☆ ';
+    }
     try {
         const response = await fetch('/api/favorites', {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -93,12 +99,22 @@ async function toggleFavorite(item, input = null) {
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail);
         item.favorited = data.favorited;
-        if (input) input.checked = item.favorited;
+        if (input) {
+            if ('checked' in input) input.checked = item.favorited;
+            input.setAttribute('aria-pressed', String(item.favorited));
+            input.setAttribute('aria-label', item.favorited ? 'Desfavoritar' : 'Favoritar');
+            if (input.classList.contains('inspector-favorite')) input.firstChild.textContent = item.favorited ? '★ ' : '☆ ';
+        }
         showStatus(item.favorited ? 'Adicionado aos favoritos.' : 'Removido dos favoritos.');
         if (activeView === 'favorites') await loadCatalog();
     } catch (error) {
         item.favorited = previous;
-        if (input) input.checked = previous;
+        if (input) {
+            if ('checked' in input) input.checked = previous;
+            input.setAttribute('aria-pressed', String(previous));
+            input.setAttribute('aria-label', previous ? 'Desfavoritar' : 'Favoritar');
+            if (input.classList.contains('inspector-favorite')) input.firstChild.textContent = previous ? '★ ' : '☆ ';
+        }
         showStatus(error.message || 'Não foi possível alterar o favorito.', 'error');
     }
 }
@@ -390,6 +406,8 @@ async function closeTools() {
     toolsRoot.replaceChildren();
     toolsModal.classList.add('hidden');
     toolsModal.classList.remove('flex');
+    if (modalReturnFocus?.isConnected) modalReturnFocus.focus();
+    modalReturnFocus = null;
 }
 
 async function closeInspector() {
@@ -399,6 +417,8 @@ async function closeInspector() {
     inspectorModal.classList.add('hidden');
     inspectorModal.classList.remove('flex');
     inspectedItem = null;
+    if (modalReturnFocus?.isConnected) modalReturnFocus.focus();
+    modalReturnFocus = null;
 }
 
 async function loadSourceExtension(source) {
@@ -419,10 +439,12 @@ async function loadSourceExtension(source) {
 
 async function openTools() {
     if (!sourceExtension?.module?.mount) return;
+    modalReturnFocus = document.activeElement;
     toolsModal.classList.remove('hidden');
     toolsModal.classList.add('flex');
     document.getElementById('tools-modal-title').textContent = `Ferramentas — ${sources.get(sourceId)?.label || sourceId}`;
     toolsRoot.textContent = 'Carregando...';
+    document.getElementById('tools-modal-title').focus();
     try {
         const mounted = await sourceExtension.module.mount({ source: sources.get(sourceId), root: toolsRoot,
             request: (action, options) => sourceRequest(sourceId, action, options),
@@ -436,13 +458,17 @@ async function openTools() {
 
 async function openInspector(item) {
     if (!sourceExtension?.module?.mountInspector) return fallbackAction(item);
+    modalReturnFocus = document.activeElement;
     inspectedItem = item;
     document.getElementById('inspector-modal-title').textContent = item.title;
     document.getElementById('inspector-modal-context').textContent = `${entityKind(item)} · ${sources.get(sourceId)?.label || sourceId}`;
-    inspectorFavorite.checked = !!item.favorited;
+    inspectorFavorite.setAttribute('aria-pressed', String(!!item.favorited));
+    inspectorFavorite.setAttribute('aria-label', item.favorited ? 'Desfavoritar' : 'Favoritar');
+    inspectorFavorite.firstChild.textContent = item.favorited ? '★ ' : '☆ ';
     inspectorRoot.textContent = 'Carregando...';
     inspectorModal.classList.remove('hidden');
     inspectorModal.classList.add('flex');
+    document.getElementById('inspector-modal-title').focus();
     try {
         const mounted = await sourceExtension.module.mountInspector({ source: sources.get(sourceId), entity: item,
             root: inspectorRoot, request: (action, options) => sourceRequest(sourceId, action, options),
@@ -455,7 +481,7 @@ async function openInspector(item) {
 }
 
 sourceToolsButton.onclick = openTools;
-inspectorFavorite.onchange = () => inspectedItem && toggleFavorite(inspectedItem, inspectorFavorite);
+inspectorFavorite.onclick = () => inspectedItem && toggleFavorite(inspectedItem, inspectorFavorite);
 document.querySelectorAll('[data-close-modal]').forEach(button => {
     button.onclick = () => button.dataset.closeModal === 'tools-modal' ? closeTools() : closeInspector();
 });
