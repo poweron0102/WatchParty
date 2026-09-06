@@ -372,3 +372,57 @@ Dois em `test_plugin_contract.py`: nenhum plugin deduz parentesco de prefixo de
 id, e **toda ação que um plugin pede existe no backend dele** — o host
 encaminha `/host/{id}/{action}` às cegas, então um typo em nome de rota vira
 404 e "Ação da origem falhou" sem dizer qual.
+
+## Etapa 8 — Ferramentas redesenhado
+
+### O `<select>` de mídia saiu, e com ele a redundância
+
+A duplicação entre os dois painéis não era de rótulo, era estrutural: as
+Ferramentas tinham um `<select>` com todas as mídias, e por isso podiam
+oferecer download, exportação e faixas — exatamente o que o Inspetor já fazia.
+Enquanto o seletor existisse, qualquer harmonização de nomes seria maquiagem.
+
+Ferramentas agora tem cinco seções, todas de escopo global: **Armazenamento**,
+**Catálogo**, **Limpeza do cache**, **Preferências padrão** e **Atividade**.
+
+### O que mudou de painel
+
+Faixas e legenda só existiam nas Ferramentas. Removê-las sem destino as
+deixaria inacessíveis no ponto de revisão, então **mudaram de painel no mesmo
+commit**, para dentro de "Avançado" no Inspetor — recolhido, como a decisão de
+arquitetura previa. No Inspetor elas ficam melhor: a mídia já é a que está
+aberta, em vez de escolhida num seletor.
+
+O modo de limpeza "Mídia selecionada" saiu da lista. Limpar o cache de uma
+mídia é ação de entidade; o que fica nas Ferramentas age sobre o conjunto.
+
+### As duas correções que a etapa 7 identificou como sendo de UI
+
+- **`skipped`** já vinha do backend e era descartado. Agora o resultado da
+  limpeza diz `N não puderam ser removidos`, e a linha fica âmbar em vez de
+  verde. Sem isso o total não fechava e o usuário não sabia.
+- **Falhas por job** eram reduzidas a uma contagem por um botão "Relatório de
+  falhas" separado. O botão sumiu: as falhas aparecem na própria linha do job,
+  dentro de um `<details>`, com mídia, estágio e erro. Contagem não diz o que
+  fazer.
+
+### Feedback inline, como decidido
+
+Nenhuma ação usa mais o aviso global. O botão vira estado de carregamento
+(`withBusy`) e o resultado aparece na seção que o produziu. O botão "Executar
+limpeza" nasce desabilitado **com o motivo visível**, e trocar de modo o
+desabilita de novo — a simulação anterior não descreve mais o que sairia.
+
+### Testes
+
+`ScopeSeparationTests` afirma a separação como invariante: as Ferramentas não
+pedem ação de entidade, o Inspetor não pede administração da origem, nenhuma
+ação é oferecida pelos dois, e `populateMedia`/`mediaSelect` não existem mais
+no corpo de `mount`.
+
+Uma sutileza que quase tornou o teste inútil: `download` e `export-mp4` chegam
+ao backend por variável (`context.request(operation)`), então procurar só por
+`context.request('...')` não os veria e o teste passaria por cegueira. A
+verificação olha também os literais de string do corpo do painel — e ignora o
+topo do arquivo, onde a tabela de tradução cita `download` como chave sem que
+isso seja ação de ninguém.

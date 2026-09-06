@@ -80,11 +80,14 @@ def host_context_keys():
     return result
 
 
-def plugin_context_uses(source):
-    """`context.X` usado por painel, separando o corpo de cada export.
+def plugin_regions(source, include_shared=True):
+    """Corpo de cada export, separado.
 
-    O que estiver fora dos dois (helpers no topo do arquivo) conta para os
-    dois, porque pode ser chamado de qualquer um deles.
+    ``include_shared`` decide o que fazer com o que esta fora dos dois
+    (helpers e tabelas no topo do arquivo).  Para saber o que um painel *pode
+    chamar*, incluir e o certo -- qualquer um alcanca um helper.  Para saber
+    o que um painel *oferece*, nao: a tabela de traducao cita 'download' como
+    chave e nao e uma acao de ninguem.
     """
     regions = {"mount": [], "mountInspector": [], "shared": []}
     current = "shared"
@@ -93,11 +96,23 @@ def plugin_context_uses(source):
         if match:
             current = match.group(1) if match.group(1) in regions else "shared"
         regions[current].append(line)
-    found = {}
-    for panel in ("mount", "mountInspector"):
-        text = "\n".join(regions[panel] + regions["shared"])
-        found[panel] = set(re.findall(r"\bcontext\.([A-Za-z_$][\w$]*)", text))
-    return found
+    extra = regions["shared"] if include_shared else []
+    return {panel: "\n".join(regions[panel] + extra) for panel in ("mount", "mountInspector")}
+
+
+def plugin_context_uses(source):
+    """`context.X` usado por painel."""
+    return {panel: set(re.findall(r"\bcontext\.([A-Za-z_$][\w$]*)", text))
+            for panel, text in plugin_regions(source).items()}
+
+
+def quoted_strings(text):
+    """Literais de string do trecho, para ver acoes passadas por variavel.
+
+    `context.request(operation)` esconde o nome da rota; `start('download')`
+    algumas linhas acima nao.
+    """
+    return set(re.findall(r"""['"]([^'"\n]{2,60})['"]""", text))
 
 
 class ContextSurfaceTests(unittest.TestCase):
@@ -183,6 +198,73 @@ class RequestedRouteTests(unittest.TestCase):
     def test_the_collection_summary_route_exists(self):
         exact, _ = backend_actions(PLUGINS / "crunchyroll" / "source.py")
         self.assertIn("cache/summary", exact)
+
+
+class ScopeSeparationTests(unittest.TestCase):
+    """Uma ação pertence a UM dos dois painéis.
+
+    A queixa que originou o redesign era redundância: Ferramentas e Inspetor
+    ofereciam download, exportação e faixas com rótulos diferentes para as
+    mesmas chamadas de backend.  Harmonizar os rótulos teria escondido o
+    problema; o conserto foi separar por escopo.
+
+    O `<select>` de mídia das Ferramentas era o que sustentava a duplicação --
+    sem ele, operar uma mídia exige abrir a mídia.
+    """
+
+    #: Agem sobre UMA entidade: so o Inspetor.
+    ENTITY_ACTIONS = ("download", "export-mp4", "download-export", "presentation", "subtitles/upload")
+
+    #: Agem sobre a origem inteira: so as Ferramentas.
+    GLOBAL_ACTIONS = ("preferences", "catalog/refresh", "cache/cleanup", "cache/cleanup-preview")
+
+    def _offered(self, module, panel):
+        """Acoes que o painel oferece, inclusive as passadas por variavel."""
+        body = plugin_regions(module.read_text(encoding="utf-8"), include_shared=False)[panel]
+        return plugin_requested_actions(body) | quoted_strings(body)
+
+    def test_the_tools_panel_does_not_operate_a_single_media(self):
+        for module in PLUGIN_MODULES:
+            offered = self._offered(module, "mount")
+            for action in self.ENTITY_ACTIONS:
+                with self.subTest(plugin=module.parent.name, action=action):
+                    self.assertNotIn(
+                        action, offered,
+                        f"'{action}' age sobre uma entidade e pertence ao Inspetor",
+                    )
+
+    def test_the_inspector_does_not_administer_the_whole_source(self):
+        for module in PLUGIN_MODULES:
+            offered = self._offered(module, "mountInspector")
+            for action in self.GLOBAL_ACTIONS:
+                with self.subTest(plugin=module.parent.name, action=action):
+                    self.assertNotIn(
+                        action, offered,
+                        f"'{action}' age sobre a origem inteira e pertence às Ferramentas",
+                    )
+
+    def test_the_media_picker_that_sustained_the_duplication_is_gone(self):
+        """Sem o `<select>` de mídia, as Ferramentas não têm sobre o que agir."""
+        body = plugin_regions(
+            (PLUGINS / "crunchyroll" / "host.mjs").read_text(encoding="utf-8"),
+            include_shared=False,
+        )["mount"]
+        self.assertNotIn("populateMedia", body)
+        self.assertNotIn("mediaSelect", body)
+
+    def test_no_action_is_offered_by_both_panels(self):
+        """A definição operacional de "sem redundância"."""
+        for module in PLUGIN_MODULES:
+            source = module.read_text(encoding="utf-8")
+            regions = plugin_regions(source)
+            # `cache` e `jobs` sao leitura de estado, nao acao: os dois paineis
+            # legitimamente perguntam "como esta isto agora?".
+            readonly = {"cache", "jobs", "cache/summary"}
+            tools = plugin_requested_actions(regions["mount"]) - readonly
+            inspector = plugin_requested_actions(regions["mountInspector"]) - readonly
+            shared = {action for action in tools & inspector if not action.startswith("jobs/")}
+            with self.subTest(plugin=module.parent.name):
+                self.assertEqual(shared, set(), f"ação oferecida nos dois painéis: {sorted(shared)}")
 
 
 class HierarchyTests(unittest.TestCase):
