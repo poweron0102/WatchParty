@@ -120,7 +120,7 @@ class StaticServingTests(unittest.TestCase):
         cls.client = TestClient(app)
 
     def test_the_shared_stylesheets_are_actually_served(self):
-        for path in ("/styles/tokens.css", "/styles/base.css"):
+        for path in ("/styles/tokens.css", "/styles/base.css", "/styles/components.css"):
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200)
