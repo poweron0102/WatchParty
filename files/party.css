@@ -1,15 +1,6 @@
-:root {
-    --bg-primary: #121212;
-    --bg-secondary: #1e1e1e;
-    --bg-tertiary: #2c2c2c;
-    --text-primary: #e0e0e0;
-    --text-secondary: #b3b3b3;
-    --border-color: #333;
-    --accent-color: #007bff;
-    --accent-hover: #0056b3;
-    --host-badge-bg: #ffc107;
-    --host-badge-text: #121212;
-}
+/* Tokens vivem em styles/tokens.css, compartilhados com / e /host.
+ * Os nomes --bg-primary, --text-secondary etc. continuam validos como
+ * alias temporarios declarados la. */
 
 * {
     box-sizing: border-box;
@@ -157,7 +148,7 @@ video {
 }
 
 .notification {
-    background-color: rgba(44, 44, 44, 0.9);
+    background-color: color-mix(in srgb, var(--panel-soft) 92%, transparent);
     color: var(--text-primary);
     padding: 12px 18px;
     border-radius: 8px;
@@ -177,11 +168,11 @@ video {
 }
 
 .notification.success {
-    border-left-color: #28a745;
+    border-left-color: var(--success);
 }
 
 .notification.warning {
-    border-left-color: var(--host-badge-bg);
+    border-left-color: var(--warning);
 }
 
 .notification-icon {

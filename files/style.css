@@ -1,15 +1,4 @@
-:root {
-    --bg: #0f1115;
-    --panel: #171a21;
-    --panel-soft: #202530;
-    --text: #f4f7fb;
-    --muted: #a7b0bf;
-    --line: #303744;
-    --accent: #2f8cff;
-    --accent-hover: #1d6fd3;
-    --danger: #ff6b6b;
-    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
-}
+/* Tokens vivem em styles/tokens.css, compartilhados com /party e /host. */
 
 * {
     box-sizing: border-box;
