@@ -2,6 +2,11 @@ function el(tag, text, className = '') {
   const value = document.createElement(tag); if (text != null) value.textContent = text; if (className) value.className = className; return value;
 }
 function button(text) { return el('button', text, 'ui-btn ui-btn--secondary'); }
+// O host so conhece o valor cru do backend e escreveria "series · Crunchyroll"
+// no cabecalho.  Quem sabe traduzir e o plugin, e setHeader e como ele alcanca
+// o elemento.
+const KIND = { series: 'Série', season: 'Temporada', episode: 'Episódio', movie: 'Filme' };
+
 function formatBytes(value) {
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']; let index = 0, number = Number(value || 0);
   while (number >= 1024 && index < units.length - 1) { number /= 1024; index++; }
@@ -114,7 +119,14 @@ export async function mount(context) {
     if (!values.length) jobs.appendChild(el('p', 'Nenhum job nesta execução.'));
     if (values.some(job => ['queued','running','paused'].includes(job.state))) timer = setTimeout(pollJobs, 1000);
   }
-  async function pollJobs() { const data = await context.request('jobs'); renderJobs(data.jobs); if (!data.jobs.some(job => ['queued','running','paused'].includes(job.state))) await loadInventory(); }
+  async function pollJobs() {
+    const data = await context.request('jobs');
+    renderJobs(data.jobs);
+    if (data.jobs.some(job => ['queued','running','paused'].includes(job.state))) return;
+    await loadInventory();
+    // O estado de cache das midias mudou; os cards precisam saber.
+    await context.notifyChanged();
+  }
   async function start(action) {
     if (!presentation || presentation.media_id !== mediaId()) await loadPresentation();
     const data = await context.request(action, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(selectionPayload())});
@@ -148,7 +160,12 @@ export async function mount(context) {
     catch (error) { context.showStatus(error.message, 'error'); }
   };
   cleanupRun.onclick = async () => {
-    if (!confirm(`Executar a limpeza simulada? Arquivos de cache removidos terão de ser baixados novamente.`)) return;
+    const confirmed = await context.confirm({
+      title: 'Executar a limpeza simulada?',
+      body: 'Os arquivos de cache removidos terão de ser baixados novamente.',
+      confirmLabel: 'Limpar', danger: true,
+    });
+    if (!confirmed) return;
     try { const result = await context.request('cache/cleanup', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cleanupPayload())});
       context.showStatus(`${result.removed} arquivo(s) removido(s), ${formatBytes(result.bytes)} recuperados.`); cleanupRun.disabled = true; await loadInventory(); }
     catch (error) { context.showStatus(error.message, 'error'); }
@@ -167,6 +184,8 @@ export function titleAction(entity, actions) { return actions.openInspector(enti
 export async function mountInspector(context) {
   const item = context.entity;
   const root = context.root;
+  const kind = item.entity_kind || item.media_kind || item.id?.split(':', 1)[0];
+  context.setHeader({ title: item.title, subtitle: `${KIND[kind] || 'Mídia'} · ${context.source?.label || 'Crunchyroll'}` });
   const heading = el('p', `${item.title} · ${item.entity_kind || item.media_kind || 'mídia'}`, 'ui-section-title');
   const status = el('p', 'Carregando disponibilidade…', 'ui-result');
   const actions = el('div', null, 'plugin-row');

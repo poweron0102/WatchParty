@@ -636,6 +636,15 @@ body {
     border-top: 1px solid var(--line);
 }
 
+/* Confirmacao destrutiva: nasce no rodape do proprio modal, para que a
+   pergunta apareca onde a acao foi pedida -- ao contrario do confirm()
+   nativo, que abre no topo do navegador, longe do contexto. */
+.host-confirm-slot {
+    flex: 0 0 auto;
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--line);
+}
+
 /* Favorito vive no Inspetor porque e contextual a entidade aberta. */
 .host-inspector-favorite {
     padding: var(--space-3);

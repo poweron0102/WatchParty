@@ -253,3 +253,57 @@ página carrega framework de CSS por CDN, nenhuma classe-ponte sobrevive, toda
 classe do markup do host pertence ao vocabulário do projeto (`host-`,
 `catalog-`, `media-`, `ui-`, `plugin-`), e toda classe usada tem regra de
 verdade em `styles/` — sem o Tailwind, uma classe sem regra falha em silêncio.
+
+## Etapa 6 — contrato de plugin
+
+As quatro adições previstas entraram, e uma delas revelou um bug.
+
+### `catalogRendered` não era API de fato — era API morta
+
+O plano dizia "o host já o chama e o Crunchyroll já o implementa; falta
+documentar". Ao ir documentar, apareceu que os dois estavam em **níveis
+diferentes**: o host chamava `sourceExtension.catalogRendered` (o *export* do
+módulo) e os dois plugins devolviam o hook de `mount()`. Nenhum dos dois
+exporta `catalogRendered` no topo do arquivo, então o hook nunca disparou.
+
+O efeito visível: a lista de mídias das Ferramentas ficava congelada no que
+existia quando o modal abriu, e a limpeza "da série/temporada atual" nunca
+sabia qual era a pasta atual.
+
+O host passou a entregar aos três níveis (export do módulo, retorno de `mount`,
+retorno de `mountInspector`). Um modal aberto **depois** de o catálogo estar na
+tela recebe o estado atual na montagem, em vez de esperar a próxima navegação.
+
+### As outras três
+
+- **`context.setHeader({title, subtitle})`** — o host escreve um padrão ao
+  abrir e o plugin substitui. O Crunchyroll passou a traduzir `series` →
+  "Série", em vez de o cabeçalho mostrar `series · Crunchyroll`.
+- **`context.notifyChanged(entityIds?)`** — o host refaz a mesma consulta que
+  produziu a tela atual (mesma view, pasta e página, catálogo ou busca). Com
+  ids, só recarrega se algum estiver visível. Os dois plugins chamam ao fim do
+  polling de jobs.
+- **`context.confirm({title, body, danger})`** — confirmação no rodapé do
+  próprio modal. Resolve `false` se o modal fechar antes, para o plugin nunca
+  ficar esperando. O `confirm()` nativo saiu dos dois plugins.
+
+### Consequência técnica
+
+`host.js` virou `<script type="module">`, porque passou a importar
+`modules/ui.js` para o `inlineConfirm`. É o mesmo módulo que os plugins usam —
+a confirmação é literalmente a mesma, não uma segunda implementação.
+
+Os dois contextos **não** são iguais, e isso agora é afirmado por teste:
+`refresh` e `navigate` só existem nas Ferramentas, `entity` só no Inspetor.
+
+### Testes (`test_plugin_contract.py`)
+
+O modo de falha destas adições é sempre o mesmo e sempre silencioso: o plugin
+chama `context.algumaCoisa()`, o host não fornece, e o painel morre com um
+TypeError no console que ninguém está olhando. Nada disso passa pelo servidor,
+então nenhum teste de backend pegaria.
+
+O teste central extrai as chaves que o host monta em cada painel e as chamadas
+`context.X` de cada plugin, **por painel**, e exige que uma esteja contida na
+outra. Comparar contra a união dos dois deixaria passar justamente o erro que
+interessa — usar no Inspetor algo que só as Ferramentas têm.

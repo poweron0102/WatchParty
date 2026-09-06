@@ -4,8 +4,7 @@
  * ser absoluto -- um caminho relativo resolveria para
  * /host/{source_id}/modules/ui.js, que nao existe.
  */
-import { html, render, section, field, button, withBusy, inlineConfirm, resultLine }
-  from '/modules/ui.js';
+import { html, render, section, field, button, withBusy, resultLine } from '/modules/ui.js';
 
 export async function mount(context) {
   let items = [], parentId = null, timer = null;
@@ -42,7 +41,6 @@ export async function mount(context) {
           ${button({ label: 'Gerar as ausentes', ref: 'missing' })}
           ${button({ label: 'Regenerar recursivamente', ref: 'overwrite', variant: 'danger' })}
         </div>
-        <div data-ref="confirm"></div>
         ${resultLine({ message: 'Nenhuma geração nesta execução.', ref: 'jobs' })}
       `,
     })}
@@ -65,6 +63,8 @@ export async function mount(context) {
     view.send.disabled = !items.length;
   }
 
+  let hadActiveJobs = false;
+
   async function refreshJobs() {
     const data = await context.request('previews/status');
     const active = (data.jobs || []).filter(job => !['completed', 'failed'].includes(job.state));
@@ -73,7 +73,15 @@ export async function mount(context) {
       view.jobs.textContent =
         `${latest.state}: ${latest.completed}/${latest.total} · ${latest.created} criada(s) · ${latest.failed} falha(s).`;
     }
-    if (active.length) timer = setTimeout(() => refreshJobs().catch(() => {}), 1000);
+    if (active.length) {
+      hadActiveJobs = true;
+      timer = setTimeout(() => refreshJobs().catch(() => {}), 1000);
+    } else if (hadActiveJobs) {
+      // As previas terminaram de ser geradas: sem isto os cards seguem
+      // mostrando a imagem antiga ate alguem navegar.
+      hadActiveJobs = false;
+      await context.notifyChanged();
+    }
   }
 
   view.send.onclick = () => withBusy(view.send, 'Enviando', async () => {
@@ -104,10 +112,11 @@ export async function mount(context) {
 
   async function bulk(overwrite, trigger) {
     if (overwrite) {
-      const confirmed = await inlineConfirm(view.confirm, {
+      const confirmed = await context.confirm({
         title: 'Regenerar recursivamente?',
         body: 'As thumbnails existentes desta pasta e das subpastas serão substituídas.',
         confirmLabel: 'Regenerar',
+        danger: true,
       });
       if (!confirmed) return;
     }
@@ -126,6 +135,7 @@ export async function mount(context) {
   view.missing.onclick = () => bulk(false, view.missing);
   view.overwrite.onclick = () => bulk(true, view.overwrite);
 
+  context.setHeader({ title: 'Prévias da pasta', subtitle: context.source?.label || 'Pasta local' });
   refreshSelection();
   refreshJobs().catch(() => {});
 

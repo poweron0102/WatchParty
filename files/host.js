@@ -1,3 +1,5 @@
+import { inlineConfirm } from './modules/ui.js';
+
 const socket = io();
 
 const sourceSelect = document.getElementById('source-select');
@@ -21,6 +23,10 @@ const remoteAdminToggle = document.getElementById('remote-host-admin-toggle');
 const remoteAdminStatus = document.getElementById('remote-host-admin-status');
 const sourceDiagnostics = document.getElementById('source-diagnostics');
 const catalogPagination = document.getElementById('catalog-pagination');
+const toolsTitle = document.getElementById('tools-modal-title');
+const toolsContext = document.getElementById('tools-modal-context');
+const inspectorTitle = document.getElementById('inspector-modal-title');
+const inspectorContext = document.getElementById('inspector-modal-context');
 const videoSectionTitle = document.getElementById('video-section-title');
 const folderSection = document.getElementById('folder-section');
 const folderSectionTitle = document.getElementById('folder-section-title');
@@ -38,6 +44,15 @@ let pageIndex = 0;
 let pageCursors = [null];
 let nextCursor = null;
 let paginationLoader = null;
+// Ultimo catalogo renderizado.  Serve a duas coisas: notifyChanged() decide
+// se vale recarregar (um job que terminou fora da tela nao mexe nela), e um
+// modal aberto depois da renderizacao recebe o estado atual na montagem.
+let renderedItems = [];
+let renderedParentId = null;
+let renderedIds = new Set();
+// Refaz exatamente a consulta que produziu a tela atual (catalogo ou busca,
+// na mesma pasta e na mesma pagina).  Mesmo formato de paginationLoader.
+let reloadCurrent = () => loadCatalog();
 
 const nativeViews = [
     ['popular', 'Popular'], ['new', 'Novidades'], ['az', 'A-Z'],
@@ -292,9 +307,12 @@ function emptyNotice(message) {
     return value;
 }
 
-function renderItems(items) {
+function renderItems(items, parentId = null) {
     folders.replaceChildren();
     videos.replaceChildren();
+    renderedItems = items;
+    renderedParentId = parentId;
+    renderedIds = new Set(items.map(item => item.id));
     const collections = items.filter(item => item.entry_type === 'collection');
     const playable = items.filter(item => item.entry_type === 'playable');
     const historyRoot = activeView === 'history' && trail.length === 0;
@@ -335,6 +353,7 @@ async function loadCatalog(parentId = null, push = false, title = null, cursor =
     }
     if (!keepPagination) resetPagination();
     paginationLoader = next => loadCatalog(parentId, false, null, next, true);
+    reloadCurrent = () => loadCatalog(parentId, false, null, cursor, true);
     renderBreadcrumbs();
     document.getElementById('catalog-loading').hidden = false;
     folders.replaceChildren();
@@ -346,9 +365,9 @@ async function loadCatalog(parentId = null, push = false, title = null, cursor =
         const response = await fetch(`/api/catalog?${params}`);
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail);
-        renderItems(data.items);
+        renderItems(data.items, parentId);
         renderPagination(data.next_cursor);
-        sourceExtension?.catalogRendered?.({ items: data.items, parentId });
+        notifyCatalogRendered({ items: data.items, parentId });
     } catch (error) {
         showStatus(error.message || 'Origem indisponível.', 'error');
         renderPagination(null);
@@ -360,6 +379,7 @@ async function loadCatalog(parentId = null, push = false, title = null, cursor =
 async function runSearch(query, cursor = null, keepPagination = false) {
     if (!keepPagination) resetPagination();
     paginationLoader = next => runSearch(query, next, true);
+    reloadCurrent = () => runSearch(query, cursor, true);
     renderBreadcrumbs();
     document.getElementById('catalog-loading').hidden = false;
     try {
@@ -368,8 +388,9 @@ async function runSearch(query, cursor = null, keepPagination = false) {
         const response = await fetch(`/api/search?${params}`);
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail);
-        renderItems(data.items);
+        renderItems(data.items, null);
         renderPagination(data.next_cursor);
+        notifyCatalogRendered({ items: data.items, parentId: null });
     } catch (error) {
         showStatus(error.message || 'Busca indisponível.', 'error');
         renderPagination(null);
@@ -395,7 +416,96 @@ async function changeView(view) {
     renderViews();
 }
 
+/* --- Contrato do plugin ---------------------------------------------- */
+
+/**
+ * Entrega `catalogRendered` a TODOS os niveis que podem implementa-lo.
+ *
+ * Ate aqui o host so chamava `sourceExtension.catalogRendered`, ou seja, o
+ * export de modulo -- mas os dois plugins devolvem o hook de `mount()`, que
+ * e onde o estado vive.  Resultado: o hook nunca disparava e a lista de
+ * midias das Ferramentas ficava presa no que existia quando o modal abriu.
+ */
+function notifyCatalogRendered(state) {
+    for (const target of [sourceExtension, toolsExtension, inspectorExtension]) {
+        try { target?.catalogRendered?.(state); } catch (error) { console.warn(error); }
+    }
+}
+
+/**
+ * Recarrega a tela quando algo que ela mostra mudou -- tipicamente um job
+ * que terminou.  Sem isso o job acaba e os cards seguem exibindo o estado
+ * anterior ate alguem navegar.
+ *
+ * `entityIds` omitido significa "nao sei quais"; com ids, o host so paga o
+ * recarregamento se algum deles estiver realmente visivel.  Devolve se
+ * recarregou, para o plugin nao precisar adivinhar.
+ */
+async function notifyChanged(entityIds = null) {
+    const ids = entityIds == null ? null : [entityIds].flat().filter(Boolean);
+    if (ids && !ids.some(id => renderedIds.has(id))) return false;
+    await reloadCurrent();
+    return true;
+}
+
+/**
+ * Deixa o plugin nomear o cabecalho do modal.  O host so sabe o valor cru do
+ * backend (`series`, `episode`), entao sem isto o Inspetor exibe
+ * "series · Crunchyroll" -- e o plugin, que sabe traduzir, nao alcanca o
+ * elemento.  Passar so `title` ou so `subtitle` mantem o outro.
+ */
+function headerSetter(titleElement, subtitleElement) {
+    return ({ title = null, subtitle = null } = {}) => {
+        if (title != null) titleElement.textContent = title;
+        if (subtitle != null && subtitleElement) subtitleElement.textContent = subtitle;
+    };
+}
+
+/**
+ * Confirmacao destrutiva dentro do proprio modal, no lugar do `confirm()`
+ * nativo -- que aparece fora do contexto, nao mostra o que sera perdido e
+ * nao da para estilizar.  Resolve `false` se o modal fechar antes.
+ */
+const pendingConfirms = new Map();
+
+function confirmIn(modal) {
+    return options => new Promise(resolve => {
+        const slot = document.createElement('div');
+        slot.className = 'host-confirm-slot';
+        modal.querySelector('.host-modal-panel').appendChild(slot);
+        const waiting = pendingConfirms.get(modal) || new Set();
+        pendingConfirms.set(modal, waiting);
+        let settled = false;
+        const finish = answer => {
+            if (settled) return;
+            settled = true;
+            waiting.delete(finish);
+            slot.remove();
+            resolve(answer);
+        };
+        waiting.add(finish);
+        inlineConfirm(slot, options).then(finish);
+    });
+}
+
+/** Fechar o modal e responder "nao" -- nunca deixar o plugin esperando. */
+function cancelConfirms(modal) {
+    for (const finish of pendingConfirms.get(modal) || []) finish(false);
+    pendingConfirms.delete(modal);
+}
+
+/** Parte do contexto que Ferramentas e Inspetor recebem igual. */
+function sharedContext() {
+    return {
+        source: sources.get(sourceId),
+        request: (action, options) => sourceRequest(sourceId, action, options),
+        showStatus,
+        notifyChanged,
+    };
+}
+
 async function closeTools() {
+    cancelConfirms(toolsModal);
     try { await toolsExtension?.cleanup?.(); } catch (error) { console.warn(error); }
     toolsExtension = null;
     toolsRoot.replaceChildren();
@@ -403,6 +513,7 @@ async function closeTools() {
 }
 
 async function closeInspector() {
+    cancelConfirms(inspectorModal);
     try { await inspectorExtension?.cleanup?.(); } catch (error) { console.warn(error); }
     inspectorExtension = null;
     inspectorRoot.replaceChildren();
@@ -429,13 +540,17 @@ async function loadSourceExtension(source) {
 async function openTools() {
     if (!sourceExtension?.module?.mount) return;
     toolsModal.hidden = false;
-    document.getElementById('tools-modal-title').textContent = `Ferramentas — ${sources.get(sourceId)?.label || sourceId}`;
+    toolsTitle.textContent = 'Ferramentas';
+    toolsContext.textContent = sources.get(sourceId)?.label || sourceId;
     toolsRoot.textContent = 'Carregando...';
     try {
-        const mounted = await sourceExtension.module.mount({ source: sources.get(sourceId), root: toolsRoot,
-            request: (action, options) => sourceRequest(sourceId, action, options),
-            navigate, refresh: () => loadCatalog(trail.at(-1)?.id || null, false), showStatus, openInspector });
+        const mounted = await sourceExtension.module.mount({ ...sharedContext(), root: toolsRoot,
+            navigate, refresh: () => loadCatalog(trail.at(-1)?.id || null, false), openInspector,
+            setHeader: headerSetter(toolsTitle, toolsContext), confirm: confirmIn(toolsModal) });
         toolsExtension = typeof mounted === 'function' ? { cleanup: mounted } : (mounted || {});
+        // O modal pode ter aberto sobre um catalogo ja renderizado: entrega o
+        // estado atual em vez de esperar a proxima navegacao.
+        if (renderedIds.size) toolsExtension.catalogRendered?.({ items: renderedItems, parentId: renderedParentId });
     } catch (error) {
         toolsRoot.textContent = error.message || 'Extensão indisponível.';
         showStatus('Não foi possível montar as ferramentas.', 'error');
@@ -445,15 +560,17 @@ async function openTools() {
 async function openInspector(item) {
     if (!sourceExtension?.module?.mountInspector) return fallbackAction(item);
     inspectedItem = item;
-    document.getElementById('inspector-modal-title').textContent = item.title;
-    document.getElementById('inspector-modal-context').textContent = `${entityKind(item)} · ${sources.get(sourceId)?.label || sourceId}`;
+    // Valor cru do backend como texto de interface e o que setHeader existe
+    // para corrigir: fica so ate o plugin dizer como se chama de verdade.
+    inspectorTitle.textContent = item.title;
+    inspectorContext.textContent = `${entityKind(item)} · ${sources.get(sourceId)?.label || sourceId}`;
     inspectorFavorite.checked = !!item.favorited;
     inspectorRoot.textContent = 'Carregando...';
     inspectorModal.hidden = false;
     try {
-        const mounted = await sourceExtension.module.mountInspector({ source: sources.get(sourceId), entity: item,
-            root: inspectorRoot, request: (action, options) => sourceRequest(sourceId, action, options),
-            showStatus, selectMedia, openTools });
+        const mounted = await sourceExtension.module.mountInspector({ ...sharedContext(), entity: item,
+            root: inspectorRoot, selectMedia, openTools,
+            setHeader: headerSetter(inspectorTitle, inspectorContext), confirm: confirmIn(inspectorModal) });
         inspectorExtension = typeof mounted === 'function' ? { cleanup: mounted } : (mounted || {});
     } catch (error) {
         inspectorRoot.textContent = error.message || 'Inspetor indisponível.';

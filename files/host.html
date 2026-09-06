@@ -114,7 +114,10 @@
 <div id="tools-modal" data-testid="tools-modal" class="host-modal" role="dialog" aria-modal="true" aria-labelledby="tools-modal-title" hidden>
   <div class="host-modal-panel">
     <header class="host-modal-head">
-      <h2 id="tools-modal-title" class="host-modal-title">Ferramentas</h2>
+      <div>
+        <h2 id="tools-modal-title" class="host-modal-title">Ferramentas</h2>
+        <p id="tools-modal-context" class="host-modal-subtitle"></p>
+      </div>
       <button type="button" data-close-modal="tools-modal" class="host-modal-close" aria-label="Fechar">&times;</button>
     </header>
     <div id="tools-modal-body" data-testid="tools-modal-body" class="host-modal-body"></div>
@@ -144,5 +147,7 @@
   </div>
 </div>
 
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script><script src="host.js?v=9"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<!-- Modulo: host.js importa modules/ui.js, o mesmo que os plugins usam. -->
+<script type="module" src="host.js?v=10"></script>
 </body></html>
