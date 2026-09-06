@@ -44,11 +44,14 @@ const nativeViews = [
     ['genres', 'Gêneros'], ['history', 'Histórico'], ['favorites', 'Favoritos']
 ];
 
+// Aviso global.  Reservado ao que acontece fora da tela visivel; feedback de
+// uma acao pertence ao controle que a disparou.
 function showStatus(message, type = 'success') {
     clearTimeout(statusTimeout);
     statusMessage.textContent = message;
-    statusMessage.className = `mb-6 rounded-md px-4 py-3 ${type === 'error' ? 'bg-red-900/50' : 'bg-green-900/50'}`;
-    statusTimeout = setTimeout(() => statusMessage.classList.add('hidden'), 4000);
+    statusMessage.className = `host-status host-status--${type === 'error' ? 'error' : 'success'}`;
+    statusMessage.hidden = false;
+    statusTimeout = setTimeout(() => { statusMessage.hidden = true; }, 4000);
 }
 
 function imageUrl(item) {
@@ -112,7 +115,7 @@ function card(item) {
 
     const body = document.createElement('button');
     body.type = 'button';
-    body.className = 'block w-full text-left';
+    body.className = 'media-card-body';
     body.onclick = () => sourceExtension?.bodyAction
         ? sourceExtension.bodyAction(item, { navigate, selectMedia, openInspector, showStatus })
         : fallbackAction(item);
@@ -180,13 +183,13 @@ function renderPagination(cursor) {
     catalogPagination.replaceChildren();
     const hasPrevious = pageIndex > 0;
     if (!hasPrevious && !nextCursor) {
-        catalogPagination.classList.add('hidden');
+        catalogPagination.hidden = true;
         return;
     }
-    catalogPagination.classList.remove('hidden');
+    catalogPagination.hidden = false;
     const previous = document.createElement('button');
     previous.type = 'button';
-    previous.className = 'bg-input px-3 py-2 rounded-md';
+    previous.className = 'ui-btn ui-btn--secondary';
     previous.textContent = 'Anterior';
     previous.disabled = !hasPrevious;
     previous.onclick = () => {
@@ -195,11 +198,11 @@ function renderPagination(cursor) {
         paginationLoader(pageCursors[pageIndex]);
     };
     const indicator = document.createElement('span');
-    indicator.className = 'text-sm text-gray-400';
+    indicator.className = 'catalog-page-indicator';
     indicator.textContent = `Página ${pageIndex + 1}`;
     const next = document.createElement('button');
     next.type = 'button';
-    next.className = 'bg-input px-3 py-2 rounded-md';
+    next.className = 'ui-btn ui-btn--secondary';
     next.textContent = 'Próxima';
     next.disabled = !nextCursor;
     next.onclick = () => {
@@ -218,14 +221,14 @@ function renderViews() {
     if (!actions) {
         actions = document.createElement('div');
         actions.id = 'catalog-view-actions';
-        actions.className = 'flex justify-end gap-2 mb-2';
+        actions.className = 'catalog-view-actions';
         searchForm.before(actions);
     }
     actions.replaceChildren();
     if (activeView === 'history') {
         const clear = document.createElement('button');
         clear.type = 'button';
-        clear.className = 'text-sm brand hover:underline';
+        clear.className = 'ui-btn ui-btn--ghost';
         clear.textContent = 'Limpar histórico';
         clear.onclick = async () => {
             await fetch(`/api/history?source_id=${encodeURIComponent(sourceId)}`, { method: 'DELETE' });
@@ -237,12 +240,12 @@ function renderViews() {
     [...nativeViews, ...pluginViews].forEach(([id, label], index) => {
         if (index === nativeViews.length && pluginViews.length) {
             const separator = document.createElement('div');
-            separator.className = 'border-t border-input my-2';
+            separator.className = 'catalog-views-separator';
             root.appendChild(separator);
         }
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = `view-item text-left px-3 py-2 rounded-md ${id === activeView ? 'active' : ''}`;
+        button.className = `catalog-view ${id === activeView ? 'active' : ''}`;
         button.textContent = label;
         button.dataset.view = id;
         button.onclick = () => changeView(id);
@@ -253,7 +256,7 @@ function renderViews() {
 function renderBreadcrumbs() {
     breadcrumbs.replaceChildren();
     const visible = trail.length > 0;
-    breadcrumbsNav.classList.toggle('hidden', !visible);
+    breadcrumbsNav.hidden = !visible;
     if (!visible) return;
     [{ id: null, title: 'Início' }, ...trail].forEach((entry, index) => {
         if (index) {
@@ -263,7 +266,8 @@ function renderBreadcrumbs() {
         }
         const li = document.createElement('li');
         const button = document.createElement('button');
-        button.className = 'brand hover:underline';
+        button.type = 'button';
+        button.className = 'catalog-crumb';
         button.textContent = entry.title;
         button.onclick = () => {
             trail = trail.slice(0, index);
@@ -281,6 +285,13 @@ function emptyMessage(view, kind) {
     return kind === 'folder' ? 'Nenhuma coleção.' : 'Nenhum vídeo.';
 }
 
+function emptyNotice(message) {
+    const value = document.createElement('p');
+    value.className = 'catalog-empty';
+    value.textContent = message;
+    return value;
+}
+
 function renderItems(items) {
     folders.replaceChildren();
     videos.replaceChildren();
@@ -290,7 +301,7 @@ function renderItems(items) {
     const favoritesRoot = activeView === 'favorites' && trail.length === 0;
     videoSectionTitle.textContent = historyRoot ? 'Histórico' : (favoritesRoot ? 'Episódios e filmes' : 'Vídeos');
     folderSectionTitle.textContent = favoritesRoot ? 'Séries e temporadas' : 'Pastas';
-    folderSection.classList.toggle('hidden', historyRoot);
+    folderSection.hidden = historyRoot;
 
     if (historyRoot) {
         [...collections, ...playable].forEach(item => videos.appendChild(card(item)));
@@ -301,7 +312,7 @@ function renderItems(items) {
             if (activeView === 'history') {
                 const remove = document.createElement('button');
                 remove.type = 'button';
-                remove.className = 'text-xs text-red-300 px-2 pb-2';
+                remove.className = 'media-card-remove';
                 remove.textContent = 'Remover do histórico';
                 remove.onclick = async () => {
                     await fetch(`/api/history/${encodeURIComponent(sourceId)}/${encodeURIComponent(item.id)}?entity_kind=${encodeURIComponent(entityKind(item))}`, { method: 'DELETE' });
@@ -313,8 +324,8 @@ function renderItems(items) {
         });
     }
     const historyItems = historyRoot ? [...collections, ...playable] : null;
-    if (!collections.length && !historyRoot) folders.innerHTML = `<p class="text-gray-500">${emptyMessage(activeView, 'folder')}</p>`;
-    if (!(historyRoot ? historyItems.length : playable.length)) videos.innerHTML = `<p class="text-gray-500">${emptyMessage(activeView, 'video')}</p>`;
+    if (!collections.length && !historyRoot) folders.appendChild(emptyNotice(emptyMessage(activeView, 'folder')));
+    if (!(historyRoot ? historyItems.length : playable.length)) videos.appendChild(emptyNotice(emptyMessage(activeView, 'video')));
 }
 
 async function loadCatalog(parentId = null, push = false, title = null, cursor = null, keepPagination = false) {
@@ -325,7 +336,7 @@ async function loadCatalog(parentId = null, push = false, title = null, cursor =
     if (!keepPagination) resetPagination();
     paginationLoader = next => loadCatalog(parentId, false, null, next, true);
     renderBreadcrumbs();
-    document.getElementById('catalog-loading').classList.remove('hidden');
+    document.getElementById('catalog-loading').hidden = false;
     folders.replaceChildren();
     videos.replaceChildren();
     const params = new URLSearchParams({ source_id: sourceId, view: activeView });
@@ -342,7 +353,7 @@ async function loadCatalog(parentId = null, push = false, title = null, cursor =
         showStatus(error.message || 'Origem indisponível.', 'error');
         renderPagination(null);
     } finally {
-        document.getElementById('catalog-loading').classList.add('hidden');
+        document.getElementById('catalog-loading').hidden = true;
     }
 }
 
@@ -350,7 +361,7 @@ async function runSearch(query, cursor = null, keepPagination = false) {
     if (!keepPagination) resetPagination();
     paginationLoader = next => runSearch(query, next, true);
     renderBreadcrumbs();
-    document.getElementById('catalog-loading').classList.remove('hidden');
+    document.getElementById('catalog-loading').hidden = false;
     try {
         const params = new URLSearchParams({ source_id: sourceId, q: query });
         if (cursor !== null) params.set('cursor', cursor);
@@ -363,7 +374,7 @@ async function runSearch(query, cursor = null, keepPagination = false) {
         showStatus(error.message || 'Busca indisponível.', 'error');
         renderPagination(null);
     } finally {
-        document.getElementById('catalog-loading').classList.add('hidden');
+        document.getElementById('catalog-loading').hidden = true;
     }
 }
 
@@ -388,16 +399,14 @@ async function closeTools() {
     try { await toolsExtension?.cleanup?.(); } catch (error) { console.warn(error); }
     toolsExtension = null;
     toolsRoot.replaceChildren();
-    toolsModal.classList.add('hidden');
-    toolsModal.classList.remove('flex');
+    toolsModal.hidden = true;
 }
 
 async function closeInspector() {
     try { await inspectorExtension?.cleanup?.(); } catch (error) { console.warn(error); }
     inspectorExtension = null;
     inspectorRoot.replaceChildren();
-    inspectorModal.classList.add('hidden');
-    inspectorModal.classList.remove('flex');
+    inspectorModal.hidden = true;
     inspectedItem = null;
 }
 
@@ -405,12 +414,12 @@ async function loadSourceExtension(source) {
     await closeTools();
     await closeInspector();
     sourceExtension = null;
-    sourceToolsButton.classList.add('hidden');
+    sourceToolsButton.hidden = true;
     if (!source?.host_module) return;
     try {
         const module = await import(`${source.host_module}?v=${encodeURIComponent(source.type || '')}`);
         sourceExtension = { module, ...module };
-        sourceToolsButton.classList.toggle('hidden', !(source.host_capabilities || []).includes('tools'));
+        sourceToolsButton.hidden = !(source.host_capabilities || []).includes('tools');
         renderViews();
     } catch (error) {
         showStatus('Não foi possível carregar a extensão desta origem.', 'error');
@@ -419,8 +428,7 @@ async function loadSourceExtension(source) {
 
 async function openTools() {
     if (!sourceExtension?.module?.mount) return;
-    toolsModal.classList.remove('hidden');
-    toolsModal.classList.add('flex');
+    toolsModal.hidden = false;
     document.getElementById('tools-modal-title').textContent = `Ferramentas — ${sources.get(sourceId)?.label || sourceId}`;
     toolsRoot.textContent = 'Carregando...';
     try {
@@ -441,8 +449,7 @@ async function openInspector(item) {
     document.getElementById('inspector-modal-context').textContent = `${entityKind(item)} · ${sources.get(sourceId)?.label || sourceId}`;
     inspectorFavorite.checked = !!item.favorited;
     inspectorRoot.textContent = 'Carregando...';
-    inspectorModal.classList.remove('hidden');
-    inspectorModal.classList.add('flex');
+    inspectorModal.hidden = false;
     try {
         const mounted = await sourceExtension.module.mountInspector({ source: sources.get(sourceId), entity: item,
             root: inspectorRoot, request: (action, options) => sourceRequest(sourceId, action, options),

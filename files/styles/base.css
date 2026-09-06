@@ -33,6 +33,16 @@ canvas {
     max-width: 100%;
 }
 
+/* O atributo `hidden` esconde de verdade.
+ *
+ * Sem esta regra, qualquer elemento com `display` proprio -- um modal
+ * `display:flex`, um card `display:grid` -- ignora `hidden` silenciosamente.
+ * Com ela, `elemento.hidden = true` volta a ser a forma de esconder algo, no
+ * lugar da classe `.hidden` que o painel do host herdou do Tailwind. */
+[hidden] {
+    display: none !important;
+}
+
 /* Foco visivel para navegacao por teclado.
  * `:focus-visible` nao dispara em clique de mouse, entao isso nao introduz
  * anel indesejado no uso com ponteiro. */

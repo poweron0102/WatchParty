@@ -80,6 +80,30 @@ custo sem retorno.
   fábrica `button()` copiada byte-a-byte entre eles.
 - Sem dependência nova: o projeto não tem `package.json` e continua assim.
 
+### Como o Tailwind sai (Q32)
+
+Três caminhos foram considerados para substituir as utilitárias do CDN:
+
+| | Caminho | Consequência |
+|---|---|---|
+| (a) | Classes semânticas (`.host-card`, `.host-modal`) | Markup fica legível e o CSS vira vocabulário do produto; diff grande de uma vez |
+| (b) | Mini-conjunto de utilitárias próprias | Markup quase intacto; recria o mesmo problema com outro nome |
+| (c) | Híbrido: componentes semânticos + punhado de utilitárias | Diff menor; convive com dois vocabulários |
+
+A recomendação do assistente foi (c), pelo argumento de que `host.js` gera
+markup com strings de classe embutidas e a tradução total seria um diff grande
+antes de qualquer melhoria visível. **O usuário escolheu (a), ciente desse
+argumento.** Vale a decisão dele.
+
+Consequência assumida: as classes nascem nomeadas pela estrutura *final*
+descrita acima (Inspetor contextual / Ferramentas global), não pela estrutura
+atual, para que as etapas 8 e 9 reescrevam markup sem reescrever o CSS.
+
+Duas classes de layout com nome genérico sobrevivem — `.plugin-row` e
+`.plugin-stack` — usadas só pelo markup que os plugins geram. Não são o começo
+de um sistema de utilitárias: são o mínimo para que um plugin agrupe controles
+sem inventar nome semântico para cada fila de botões.
+
 ### Contrato de plugin
 
 Quatro adições retrocompatíveis (o plugin `directory` continua funcionando sem
@@ -187,3 +211,45 @@ Adiado para a etapa 2: `<span id="source-extension-root">` em `host.html` é
 markup vestigial (destruído no primeiro `replaceChildren`), mas
 `tests/test_host_layout.py` afirma sua presença. Sai junto com a reescrita dos
 testes.
+
+## Etapa 5 — o Tailwind saiu
+
+O CDN entrava por três portas, e as três foram fechadas:
+
+1. `<script src="https://cdn.tailwindcss.com">` em `host.html`.
+2. As classes-ponte no `<style>` embutido (`.bg-card`, `.bg-brand`,
+   `.bg-input`, `.border-input`), que traduziam nomes do framework de volta
+   para os tokens do projeto.
+3. As strings de classe utilitária no markup — em `host.html`, embutidas na
+   geração de cards e views em `host.js`, e nos dois plugins.
+
+O `<style>` embutido virou `files/styles/host.css`, nomeado pela estrutura
+final: `.host-card`, `.host-modal`, `.catalog-view`, `.media-item`. Campos e
+botões passaram a usar `.ui-input` e `.ui-btn` de `components.css`, em vez de
+uma segunda definição só do host.
+
+Três consequências que valem registro:
+
+- **`.hidden` morreu junto.** Era uma classe do Tailwind usada em 14 lugares.
+  No lugar dela entrou o atributo `hidden` (`elemento.hidden = true`), com
+  `[hidden]{display:none!important}` em `base.css` — necessário porque um modal
+  `display:flex` ignoraria `hidden` sem isso. Some com o par
+  `add('hidden')`/`add('flex')` que os modais faziam.
+- **O modal foi de 640px para 880px**, cumprindo a decisão de arquitetura de
+  informação acima. O Inspetor e as Ferramentas usam a mesma largura para que
+  alternar entre eles não mova a página.
+- **O plugin `directory` foi reescrito sobre `modules/ui.js`.** O import é
+  absoluto (`/modules/ui.js`) porque o módulo é servido de
+  `/host/{source_id}/module.js` — um caminho relativo resolveria para
+  `/host/{source_id}/modules/ui.js`. Ganhou seções com título, feedback no
+  próprio botão (`withBusy`) e `inlineConfirm` no lugar do `confirm()` nativo.
+
+O plugin `crunchyroll` recebeu apenas troca mecânica de classe (nenhuma mudança
+de comportamento) e correção da acentuação dos textos de interface. A
+reestruturação dele é o assunto das etapas 8 e 9.
+
+Quatro testes novos guardam o resultado, em `test_design_system.py`: nenhuma
+página carrega framework de CSS por CDN, nenhuma classe-ponte sobrevive, toda
+classe do markup do host pertence ao vocabulário do projeto (`host-`,
+`catalog-`, `media-`, `ui-`, `plugin-`), e toda classe usada tem regra de
+verdade em `styles/` — sem o Tailwind, uma classe sem regra falha em silêncio.

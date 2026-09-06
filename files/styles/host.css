@@ -1,0 +1,753 @@
+/* Painel do Host: layout e componentes proprios da pagina /host.
+ *
+ * Este arquivo substitui duas coisas ao mesmo tempo: o <style> embutido em
+ * host.html e o CDN do Tailwind, que existia so aqui.  Enquanto o Tailwind
+ * viveu, o markup carregava strings como
+ * `bg-card p-5 rounded-lg shadow-lg` e um bloco de classes-ponte traduzia
+ * `bg-card` de volta para `var(--panel)` -- ou seja, o projeto pagava um
+ * framework para depois desfaze-lo.
+ *
+ * As classes daqui sao nomeadas pelo papel que o elemento tem na estrutura
+ * FINAL do redesign (Inspetor contextual, Ferramentas global), e nao pela
+ * aparencia nem pela estrutura de hoje.  Assim as etapas seguintes podem
+ * reescrever markup sem reescrever CSS.
+ *
+ * Cor, espacamento, raio e sombra vem de styles/tokens.css.  Valor cravado
+ * aqui e bug, com uma excecao anotada no lugar onde acontece.
+ */
+
+/* --- Casca ------------------------------------------------------------ */
+
+/* A pagina inteira nao rola.  Quem rola sao as regioes internas, para que o
+   cabecalho e a lista de origens fiquem sempre alcancaveis. */
+html,
+body {
+    height: 100%;
+    overflow: hidden;
+}
+
+.host-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    max-width: min(calc(100% - 2rem), 1600px);
+    margin: 0 auto;
+    padding: var(--space-4);
+    overflow: hidden;
+}
+
+.host-header {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+}
+
+.host-brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+}
+
+.host-brand img {
+    width: 2.25rem;
+    height: 2.25rem;
+}
+
+.host-brand h1 {
+    margin: 0;
+    font-size: var(--text-xl);
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.host-brand p {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-sm);
+    color: var(--muted);
+}
+
+.host-party-link {
+    padding: var(--space-2) var(--space-3);
+    background: var(--panel-soft);
+    color: var(--text);
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.host-party-link:hover {
+    background: var(--accent);
+    color: var(--on-accent);
+}
+
+/* --- Aviso global ------------------------------------------------------
+ * Reservado ao que acontece fora da tela visivel.  Feedback de acao mora no
+ * proprio controle que a disparou (ver .ui-btn.is-busy em components.css). */
+
+.host-status {
+    margin-bottom: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+}
+
+.host-status--success {
+    color: var(--success);
+    background: var(--success-soft);
+    border-color: var(--success);
+}
+
+.host-status--error {
+    color: var(--danger);
+    background: var(--danger-soft);
+    border-color: var(--danger);
+}
+
+/* --- Grade principal -------------------------------------------------- */
+
+.host-grid {
+    display: grid;
+    flex: 1;
+    align-items: start;
+    gap: var(--space-5);
+    grid-template-columns: 1fr;
+    min-height: 0;
+}
+
+@media (min-width: 1024px) {
+    .host-grid {
+        gap: var(--space-6);
+        grid-template-columns: 300px minmax(0, 1fr);
+    }
+}
+
+.host-settings {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    height: 100%;
+    min-height: 0;
+    padding-right: var(--space-1);
+    overflow-y: auto;
+}
+
+/* --- Cartao de configuracao ------------------------------------------- */
+
+.host-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+}
+
+.host-card-title {
+    margin: 0;
+    font-size: var(--text-lg);
+    font-weight: 600;
+}
+
+.host-card-description {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--muted);
+}
+
+.host-card-note {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--muted);
+}
+
+.host-field-label {
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+.host-inline-row {
+    display: flex;
+    gap: var(--space-2);
+}
+
+.host-inline-row .ui-input {
+    min-width: 0;
+}
+
+.host-check-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    font-size: var(--text-sm);
+}
+
+.host-check-row input {
+    width: 1.15rem;
+    height: 1.15rem;
+    flex: 0 0 auto;
+    accent-color: var(--accent);
+}
+
+.host-diagnostics {
+    margin: 0;
+    padding-left: var(--space-4);
+    font-size: var(--text-sm);
+    color: var(--danger);
+}
+
+/* Abre as Ferramentas (escopo global do plugin).  E um cartao clicavel, nao
+   um botao dentro de um cartao, porque a acao E o cartao inteiro. */
+.host-tools-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    font: inherit;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+
+.host-tools-trigger:hover {
+    background: var(--panel-soft);
+    border-color: var(--line-strong);
+}
+
+/* --- Explorador de midia ---------------------------------------------- */
+
+.host-explorer {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    height: 100%;
+    min-height: 0;
+    padding: var(--space-5);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+
+.host-explorer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+}
+
+.host-explorer-eyebrow {
+    margin: 0;
+    font-size: var(--text-xs);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--faint);
+}
+
+.host-explorer-title {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-2xl);
+    font-weight: 600;
+}
+
+.host-explorer-hint {
+    font-size: var(--text-sm);
+    color: var(--faint);
+}
+
+.host-search {
+    display: flex;
+    gap: var(--space-2);
+}
+
+.host-explorer-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+/* --- Views do catalogo ------------------------------------------------ */
+
+.catalog-views {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 180px;
+    padding-right: var(--space-1);
+}
+
+.catalog-view {
+    display: block;
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    background: transparent;
+    color: var(--text);
+    border: 0;
+    border-left: 3px solid transparent;
+    border-radius: var(--radius-sm);
+    font: inherit;
+    font-size: var(--text-sm);
+    text-align: left;
+    cursor: pointer;
+}
+
+.catalog-view:hover {
+    background: var(--panel-soft);
+}
+
+.catalog-view.active {
+    background: var(--panel-soft);
+    border-left-color: var(--accent);
+    font-weight: 600;
+}
+
+/* Separa as views nativas das que o plugin da origem acrescenta. */
+.catalog-views-separator {
+    margin: var(--space-2) 0;
+    border-top: 1px solid var(--line);
+}
+
+.catalog-view-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+}
+
+/* --- Conteudo do catalogo --------------------------------------------- */
+
+.catalog-content {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.catalog-breadcrumbs {
+    margin-bottom: var(--space-3);
+    font-size: var(--text-sm);
+}
+
+.catalog-breadcrumbs ol {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    color: var(--faint);
+}
+
+.catalog-crumb {
+    padding: 0;
+    background: none;
+    border: 0;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+}
+
+.catalog-crumb:hover {
+    text-decoration: underline;
+}
+
+.catalog-loading {
+    margin-bottom: var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--faint);
+}
+
+.catalog-scroll {
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 var(--space-3) var(--space-2) 0;
+}
+
+.catalog-section + .catalog-section {
+    margin-top: var(--space-6);
+}
+
+.catalog-section-title {
+    margin: 0 0 var(--space-3);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--line);
+    font-size: var(--text-lg);
+    font-weight: 600;
+}
+
+.catalog-empty {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--faint);
+}
+
+.catalog-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    padding: var(--space-4) 0 var(--space-1);
+}
+
+.catalog-page-indicator {
+    font-size: var(--text-sm);
+    color: var(--muted);
+}
+
+/* --- Card de midia ----------------------------------------------------
+ * Pasta e retrato (2:3), video e paisagem (16:9).  A distincao e o que
+ * permite reconhecer o tipo sem ler o rotulo. */
+
+.media-grid-layout {
+    display: grid;
+    align-items: start;
+    gap: var(--space-4);
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
+.media-grid-layout#video-grid {
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+}
+
+.media-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-self: start;
+    min-width: 0;
+    background: var(--panel-soft);
+    border-radius: var(--radius);
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.media-item:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.media-card-body {
+    display: block;
+    width: 100%;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.media-item img.banner {
+    display: block;
+    width: 100%;
+    border-radius: var(--radius);
+    object-fit: cover;
+}
+
+.media-item.folder img.banner {
+    aspect-ratio: 2/3;
+}
+
+.media-item.video img.banner {
+    aspect-ratio: 16/9;
+}
+
+/* O titulo flutua sobre a capa em vez de empurrar o card: assim todos os
+   cards da grade tem a mesma altura, independentemente do tamanho do nome. */
+.media-item .file-name {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    z-index: 2;
+    display: block;
+    width: 100%;
+    padding: var(--space-3);
+    border: 0;
+    border-radius: 0 0 var(--radius) var(--radius);
+    /* Valor cravado deliberado: o veu precisa ser escuro sobre QUALQUER capa,
+       inclusive quando a paleta mudar.  Nao e cor de superficie do tema. */
+    background-color: rgba(15, 17, 21, 0.72);
+    backdrop-filter: blur(4px);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--text-sm);
+    line-height: 1.25;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.media-item .file-name:hover {
+    white-space: normal;
+}
+
+.type-indicator,
+.favorite-badge {
+    position: absolute;
+    top: var(--space-2);
+    z-index: 3;
+    padding: var(--space-1) var(--space-2);
+    background: rgba(15, 17, 21, 0.72);
+    backdrop-filter: blur(5px);
+    border-radius: var(--radius-sm);
+}
+
+.type-indicator {
+    left: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--muted);
+}
+
+.favorite-badge {
+    right: var(--space-2);
+    border: 0;
+    color: var(--muted);
+    font: inherit;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.favorite-badge.is-favorite {
+    color: var(--warning);
+}
+
+.media-progress {
+    height: 3px;
+    background: var(--bg);
+}
+
+.media-progress span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+}
+
+.media-card-remove {
+    padding: 0 var(--space-2) var(--space-2);
+    background: none;
+    border: 0;
+    color: var(--danger);
+    font: inherit;
+    font-size: var(--text-xs);
+    text-align: left;
+    cursor: pointer;
+}
+
+.media-card-remove:hover {
+    text-decoration: underline;
+}
+
+/* --- Modal ------------------------------------------------------------
+ * Inspetor e Ferramentas usam o mesmo container.  A largura maxima e a
+ * mesma nos dois para que alternar entre eles nao mova a pagina. */
+
+.host-modal {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-overlay);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-4);
+    background: rgba(0, 0, 0, 0.68);
+}
+
+.host-modal-panel {
+    display: flex;
+    flex-direction: column;
+    width: min(880px, 92vw);
+    max-height: 88vh;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+}
+
+.host-modal-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--line);
+}
+
+.host-modal-title {
+    margin: 0;
+    font-size: var(--text-lg);
+    font-weight: 600;
+}
+
+.host-modal-subtitle {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-sm);
+    color: var(--muted);
+}
+
+.host-modal-close {
+    flex: 0 0 auto;
+    padding: 0 var(--space-2);
+    background: none;
+    border: 0;
+    color: var(--muted);
+    font: inherit;
+    font-size: var(--text-xl);
+    line-height: 1;
+    cursor: pointer;
+}
+
+.host-modal-close:hover {
+    color: var(--text);
+}
+
+.host-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--space-4);
+    overflow-y: auto;
+}
+
+.host-modal-footer {
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--line);
+}
+
+/* Favorito vive no Inspetor porque e contextual a entidade aberta. */
+.host-inspector-favorite {
+    padding: var(--space-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+}
+
+/* --- Markup gerado por plugin ----------------------------------------
+ * Os plugins montam grupos de controles cuja composicao o host nao conhece.
+ * Estas duas classes existem para que eles agrupem sem inventar um nome
+ * semantico por fila de botoes -- e sao deliberadamente as unicas duas. */
+
+.plugin-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.plugin-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+/* Um <fieldset> com <legend> -- agrupamento que o plugin monta e o host nao
+   conhece o conteudo. */
+.plugin-group {
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+}
+
+.plugin-group > legend {
+    padding: 0 var(--space-1);
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+/* --- Adaptacao a telas menores ---------------------------------------- */
+
+@media (max-width: 1023px) {
+    html,
+    body {
+        height: auto;
+        overflow: auto;
+    }
+
+    .host-shell {
+        height: auto;
+        min-height: 100dvh;
+        overflow: visible;
+    }
+
+    .host-settings,
+    .host-explorer {
+        height: auto;
+        overflow: visible;
+    }
+
+    .catalog-scroll {
+        overflow: visible;
+    }
+}
+
+@media (max-width: 767px) {
+    .host-shell {
+        max-width: 100%;
+    }
+
+    .host-header {
+        align-items: flex-start;
+    }
+
+    .host-brand p {
+        display: none;
+    }
+
+    .host-party-link {
+        font-size: var(--text-sm);
+    }
+
+    .host-explorer-hint {
+        display: none;
+    }
+
+    .host-explorer-body {
+        display: block;
+    }
+
+    /* A barra lateral de views vira uma fila horizontal rolavel, e o
+       indicador de selecao acompanha: borda embaixo, nao a esquerda. */
+    .catalog-views {
+        flex-direction: row;
+        min-width: 0;
+        gap: var(--space-2);
+        padding-bottom: var(--space-3);
+        overflow-x: auto;
+    }
+
+    .catalog-view {
+        width: auto;
+        border-left: 0;
+        border-bottom: 2px solid transparent;
+        white-space: nowrap;
+    }
+
+    .catalog-view.active {
+        border-bottom-color: var(--accent);
+    }
+
+    .media-grid-layout#video-grid {
+        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    }
+}
