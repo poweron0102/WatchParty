@@ -534,6 +534,25 @@ body {
     color: var(--warning);
 }
 
+/* Slot que `decorateCard` preenche.  Fica abaixo do indicador de tipo, no
+   canto que o titulo e o favorito nao ocupam, e some quando o plugin nao tem
+   nada a dizer -- card sem cache nao precisa de um selo dizendo "nada". */
+.media-card-badges {
+    position: absolute;
+    top: calc(var(--space-2) + 1.6rem);
+    left: var(--space-2);
+    z-index: 3;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    max-width: calc(100% - var(--space-4));
+    pointer-events: none;
+}
+
+.media-card-badges:empty {
+    display: none;
+}
+
 .media-progress {
     height: 3px;
     background: var(--bg);

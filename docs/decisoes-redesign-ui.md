@@ -426,3 +426,63 @@ ao backend por variável (`context.request(operation)`), então procurar só por
 verificação olha também os literais de string do corpo do painel — e ignora o
 topo do arquivo, onde a tabela de tradução cita `download` como chave sem que
 isso seja ação de ninguém.
+
+## Etapa 9 — Inspetor e `decorateCard`
+
+### Três botões viraram um botão e uma caixa
+
+`download`, `export-mp4` e `download-export` eram três botões para duas
+decisões. Agora há **"Baixar"** e a caixa **"Exportar MP4 ao terminar"**;
+`export-mp4` continua no backend mas deixou de ser um conceito na tela.
+
+Um rótulo curto sobre um estado que muda mente com facilidade, então abaixo do
+botão há uma linha que diz o que aquele clique vai fazer agora — "Vai baixar os
+segmentos e gravar um MP4 ao terminar", ou, quando a mídia já está baixada, "Os
+segmentos já estão em cache; vai apenas gravar o MP4". Se já está baixada e a
+caixa está desmarcada, o botão desabilita **dizendo por quê**.
+
+### Limpar o cache de uma mídia voltou a existir
+
+A etapa 8 tirou o modo "Mídia selecionada" das Ferramentas por ser ação de
+entidade, e isso o deixou temporariamente inalcançável. Ele reaparece aqui,
+no Inspetor, com confirmação inline que diz que o MP4 exportado não é afetado.
+
+`cache/cleanup` é a única rota que serve os dois escopos — quem separa é o
+`mode` do payload. O teste de escopo trata isso explicitamente em vez de
+comparar nomes de rota, que daria veredito errado nos dois sentidos.
+
+### `decorateCard`, em duas fases
+
+O hook estava pronto e ocioso no host desde sempre. O problema de usá-lo é que
+ele roda **por card** e **antes** de o plugin saber qual é a página — uma
+consulta ali seria uma consulta por card.
+
+Então: `decorateCard` só cria um slot vazio marcado com o id, e
+`catalogRendered`, que roda depois com a página inteira, faz **uma** consulta
+e preenche todos. O slot guarda o id no próprio DOM em vez de num `Map` do
+módulo — card que sai da tela leva o slot junto, sem entrada velha para limpar.
+
+Card sem cache não ganha selo: "Sem cache" em cada card de uma página inteira
+seria ruído, não sinal.
+
+Isso exigiu duas mudanças no host: os hooks de nível de módulo passaram a
+receber um contexto reduzido (não tinham `request`, e sem ele um plugin não tem
+como descobrir o que precisa), e `.media-card-badges` entrou no CSS do card,
+com `:empty { display: none }`.
+
+### O SHA-256 deixou de ser cobrado de todo mundo
+
+`_valid_export` lia o **arquivo inteiro** para conferir o hash — e é ela quem
+decide o rótulo "Exportado". Isso tornava `inventory()` proporcional ao tamanho
+de tudo que já foi exportado, a cada abertura do painel e ao fim de cada job.
+Com um selo por card, ficaria inviável.
+
+Presença e integridade são perguntas diferentes. `_valid_export` passou a
+responder a primeira (arquivo existe, tamanho confere), e a segunda virou
+`verify_export`, sob demanda. Truncamento continua sendo pego pelo tamanho; só
+alteração de mesmo tamanho escapa — e o SHA-256 registrado fica visível nos
+detalhes da exportação, recolhido.
+
+O Inspetor também parou de pedir `cache` (o inventário inteiro, com faixas e
+representações de **todas** as mídias) para achar uma linha: usa
+`cache/states?media_ids=` com um id só.

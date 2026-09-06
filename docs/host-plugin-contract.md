@@ -34,8 +34,8 @@ com nomes diferentes foi o defeito que este contrato existe para nao repetir.
 - `titleAction(entity, actions)` e `bodyAction(entity, actions)`: customizam as
   duas zonas do card. Sem esses hooks o host navega em series/temporadas e
   seleciona episodios/filmes para reproducao.
-- `decorateCard(entity, element)`: acrescenta apresentacao ao card sem
-  substituir o favorito comum do host.
+- `decorateCard(entity, element, context)`: acrescenta apresentacao ao card sem
+  substituir o favorito comum do host. Ver abaixo.
 
 `mount` e `mountInspector` podem devolver um objeto (ou uma funcao, tratada
 como `cleanup`). O objeto devolvido pode conter:
@@ -61,6 +61,44 @@ vive; normalmente e no retorno de `mount`.
 
 Um modal aberto **depois** de o catalogo ja estar na tela recebe o estado atual
 na montagem, entao nao e preciso esperar a proxima navegacao.
+
+## `decorateCard(entity, element, context)` — e o par com `catalogRendered`
+
+Chamado uma vez por card, durante a renderizacao. `element` e o `<article>`
+do card, ja com corpo, titulo e favorito.
+
+**Nao faca requisicao aqui.** `decorateCard` roda por card e antes de o plugin
+saber qual pagina e; uma consulta aqui vira uma consulta por card. O padrao e
+em duas fases:
+
+1. `decorateCard` cria um slot vazio e marca a que entidade ele pertence.
+2. `catalogRendered`, que roda depois com a pagina inteira, faz **uma**
+   consulta e preenche todos os slots.
+
+O host oferece `.media-card-badges` para isso: posicionado no card e
+`display:none` quando vazio, de modo que um card sem nada a dizer nao ganha
+selo. Guarde o id no proprio DOM (`dataset`) em vez de num `Map` do modulo --
+card que sai da tela leva o slot junto, sem entrada velha para limpar.
+
+`decorateCard` e o `catalogRendered` de nivel de modulo recebem um contexto
+reduzido: `source`, `request`, `showStatus`, `notifyChanged` e `openInspector`.
+Nao ha `root` nem `entity` porque nao ha painel montado.
+
+```js
+export function decorateCard(entity, element) {
+  if (entity.entry_type !== 'playable') return;
+  const slot = document.createElement('div');
+  slot.className = 'media-card-badges';
+  slot.dataset.mediaId = entity.id;
+  element.appendChild(slot);
+}
+
+export async function catalogRendered(state, context) {
+  const slots = [...document.querySelectorAll('.media-card-badges[data-media-id]')];
+  const data = await context.request(`estado?ids=${slots.map(s => s.dataset.mediaId)}`);
+  // ... preenche cada slot
+}
+```
 
 ## `context.request(action, options)`
 

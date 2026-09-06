@@ -183,7 +183,7 @@ function card(item) {
     };
 
     element.append(body, title, favorite);
-    sourceExtension?.decorateCard?.(item, element);
+    sourceExtension?.decorateCard?.(item, element, pluginPage);
     return element;
 }
 
@@ -428,7 +428,7 @@ async function changeView(view) {
  */
 function notifyCatalogRendered(state) {
     for (const target of [sourceExtension, toolsExtension, inspectorExtension]) {
-        try { target?.catalogRendered?.(state); } catch (error) { console.warn(error); }
+        try { target?.catalogRendered?.(state, pluginPage); } catch (error) { console.warn(error); }
     }
 }
 
@@ -493,6 +493,22 @@ function cancelConfirms(modal) {
     for (const finish of pendingConfirms.get(modal) || []) finish(false);
     pendingConfirms.delete(modal);
 }
+
+/**
+ * Contexto dos hooks de pagina (`decorateCard`, `catalogRendered` no nivel do
+ * modulo).  Sao exports do modulo, chamados sem nenhum painel montado, entao
+ * nao alcancavam `request` -- e sem isso um plugin nao tem como descobrir o
+ * que precisa para decorar um card.
+ *
+ * Objeto unico com getter para `source`, em vez de um novo por card.
+ */
+const pluginPage = {
+    get source() { return sources.get(sourceId); },
+    request: (action, options) => sourceRequest(sourceId, action, options),
+    showStatus,
+    notifyChanged,
+    openInspector,
+};
 
 /** Parte do contexto que Ferramentas e Inspetor recebem igual. */
 function sharedContext() {

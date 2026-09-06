@@ -177,3 +177,76 @@ class OrphanCleanupTests(unittest.TestCase):
             self.assertEqual(result["skipped"], 0)
             # `bytes` e o que foi recuperado de verdade, nao o previsto.
             self.assertEqual(result["bytes"], 4)
+
+
+class CardStateTests(unittest.TestCase):
+    """`states()` alimenta o selo dos cards: uma consulta por pagina.
+
+    Antes, saber se um episodio estava baixado exigia abrir o Inspetor um por
+    um -- ou pedir `inventory()`, que monta faixas e representacoes de TODAS
+    as midias para responder sobre algumas.
+    """
+
+    def test_it_answers_only_about_the_ids_asked_for(self):
+        with tempfile.TemporaryDirectory() as root:
+            cache = CrunchyrollCache(root, "crunch")
+            cache_one_episode(cache, "episode:1", root)
+            cache_one_episode(cache, "episode:2", root)
+
+            states = cache.states(["episode:1"])
+
+            self.assertEqual(set(states), {"episode:1"})
+            self.assertEqual(states["episode:1"]["state"], "offline")
+
+    def test_an_id_the_cache_never_saw_is_simply_absent(self):
+        """Ausente e mais util que uma linha dizendo zero: quem pergunta ja
+        sabe o que fazer com o silencio, e o card nao ganha selo."""
+        with tempfile.TemporaryDirectory() as root:
+            cache = CrunchyrollCache(root, "crunch")
+            self.assertEqual(cache.states(["episode:nunca-visto"]), {})
+            self.assertEqual(cache.states([]), {})
+
+    def test_it_agrees_with_the_full_inventory(self):
+        with tempfile.TemporaryDirectory() as root:
+            cache = CrunchyrollCache(root, "crunch")
+            cache_one_episode(cache, "episode:1", root)
+            inventory = {item["media_id"]: item for item in cache.inventory()}
+            states = cache.states(["episode:1"])
+            self.assertEqual(states["episode:1"]["state"], inventory["episode:1"]["state"])
+            self.assertEqual(states["episode:1"]["coverage"], inventory["episode:1"]["coverage"])
+            self.assertEqual(states["episode:1"]["cached_bytes"], inventory["episode:1"]["cached_bytes"])
+
+
+class ExportValidityTests(unittest.TestCase):
+    """Presenca e integridade sao perguntas diferentes.
+
+    O rotulo "Exportado" e consultado em lote, para uma pagina inteira de
+    cards; conferir o SHA-256 ali significaria reler todo MP4 ja exportado.
+    A integridade continua verificavel, mas sob demanda.
+    """
+
+    def _export_row(self, path, size, sha):
+        return {"path": str(path), "size": size, "sha256": sha}
+
+    def test_presence_check_accepts_a_file_that_is_there_with_the_right_size(self):
+        with tempfile.TemporaryDirectory() as root:
+            target = Path(root) / "video.mp4"
+            target.write_bytes(b"conteudo")
+            row = self._export_row(target, 8, hashlib.sha256(b"conteudo").hexdigest())
+            self.assertTrue(CrunchyrollCache._valid_export(row))
+
+    def test_presence_check_rejects_a_missing_or_truncated_file(self):
+        with tempfile.TemporaryDirectory() as root:
+            target = Path(root) / "video.mp4"
+            row = self._export_row(target, 8, hashlib.sha256(b"conteudo").hexdigest())
+            self.assertFalse(CrunchyrollCache._valid_export(row))
+            target.write_bytes(b"curto")
+            self.assertFalse(CrunchyrollCache._valid_export(row))
+
+    def test_only_the_deep_check_notices_content_that_changed_without_resizing(self):
+        with tempfile.TemporaryDirectory() as root:
+            target = Path(root) / "video.mp4"
+            target.write_bytes(b"corrompido")
+            row = self._export_row(target, 10, hashlib.sha256(b"originalxx").hexdigest())
+            self.assertTrue(CrunchyrollCache._valid_export(row), "mesmo tamanho passa na presenca")
+            self.assertFalse(CrunchyrollCache.verify_export(row), "o hash e quem pega isto")

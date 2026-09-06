@@ -457,6 +457,11 @@ class ManagedCrunchyrollSource(CrunchyrollSource):
                                  "subtitle_languages": self.options.get("subtitle_languages", []),
                                  "video_quality": self.options.get("video_quality"),
                                  "audio_quality": self.options.get("audio_quality")}}
+        if action == "cache/states" and request.method == "GET":
+            raw = request.query_params.get("media_ids", "")
+            media_ids = [value for value in raw.split(",") if value]
+            if not media_ids: return {"states": {}}
+            return {"states": await asyncio.to_thread(self.cache.states, media_ids)}
         if action == "cache/summary" and request.method == "GET":
             parent_id = request.query_params.get("parent_id", "")
             if not parent_id: raise HTTPException(422, "parent_id é obrigatório")

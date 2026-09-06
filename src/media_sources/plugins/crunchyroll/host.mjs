@@ -362,6 +362,53 @@ export async function mount(context) {
 // disponibilidade e das operacoes especificas do Crunchyroll.
 export function titleAction(entity, actions) { return actions.openInspector(entity); }
 
+/* --- Estado no card --------------------------------------------------
+ * Descobrir se um episodio esta baixado exigia abrir o Inspetor um por um.
+ * O hook `decorateCard` estava pronto e ocioso no host desde sempre.
+ *
+ * Sao duas fases porque o host chama `decorateCard` durante a renderizacao,
+ * antes de o plugin saber qual pagina e: aqui so nasce o slot vazio, e
+ * `catalogRendered` -- que roda depois, com a pagina inteira -- faz UMA
+ * consulta e preenche todos.  Uma requisicao por pagina, nao por card.
+ *
+ * O slot guarda o id no proprio DOM em vez de num Map do modulo: card que
+ * saiu da tela leva o slot embora, sem deixar entrada velha para limpar. */
+
+export function decorateCard(entity, element) {
+    if (entity.entry_type !== 'playable') return;
+    const slot = document.createElement('div');
+    slot.className = 'media-card-badges';
+    slot.dataset.mediaId = entity.id;
+    element.appendChild(slot);
+}
+
+export async function catalogRendered(state, context) {
+    const slots = [...document.querySelectorAll('.media-card-badges[data-media-id]')];
+    if (!slots.length || !context?.request) return;
+    const ids = slots.map(slot => slot.dataset.mediaId);
+    let states = {};
+    try {
+        const data = await context.request(`cache/states?${new URLSearchParams({ media_ids: ids.join(',') })}`);
+        states = data.states || {};
+    } catch (error) {
+        return; // Card sem selo e melhor que card com selo errado.
+    }
+    for (const slot of slots) {
+        const cached = states[slot.dataset.mediaId];
+        // Ausente ou vazio nao ganha selo: um "Sem cache" em cada card de uma
+        // pagina inteira seria ruido, nao informacao.
+        if (!cached || cached.state === 'empty') {
+            slot.replaceChildren();
+            continue;
+        }
+        const [label, tone] = STATE[cached.state] || ['Desconhecido', 'neutral'];
+        const text = cached.state === 'partial'
+            ? `${label} · ${Math.round((cached.coverage || 0) * 100)}%`
+            : label;
+        render(slot, badge({ label: text, tone, technical: cached.state }));
+    }
+}
+
 export async function mountInspector(context) {
   const item = context.entity;
   const kind = item.entity_kind || item.media_kind || item.id?.split(':', 1)[0];
@@ -373,6 +420,15 @@ export async function mountInspector(context) {
 
   let presentation = null;
   let timer = null;
+  let downloaded = false;
+
+  /** Motivo visivel de um botao desabilitado, em par com o `title`. */
+  function setReason(element, reason) {
+    element.title = reason || '';
+    if (!reason) element.removeAttribute('title');
+    const explanation = element.parentElement?.querySelector('.ui-btn-reason');
+    if (explanation) explanation.textContent = reason;
+  }
 
   const view = render(context.root, html`
     ${section({
@@ -382,14 +438,29 @@ export async function mountInspector(context) {
     ${playable ? html`
       ${section({
         title: 'Baixar',
-        description: 'O download alimenta o cache local; a exportação grava um MP4 único.',
         body: html`
+          <label class="plugin-row">
+            <input type="checkbox" data-ref="exportToo">
+            <span>Exportar MP4 ao terminar</span>
+          </label>
           <div class="plugin-row">
-            ${button({ label: 'Baixar para cache', ref: 'download', variant: 'primary' })}
-            ${button({ label: 'Salvar como MP4', ref: 'save' })}
-            ${button({ label: 'Baixar e salvar como MP4', ref: 'downloadSave' })}
+            ${button({ label: 'Baixar', ref: 'download', variant: 'primary' })}
           </div>
+          ${resultLine({ message: '', ref: 'intent' })}
           ${resultLine({ message: '', ref: 'jobResult' })}
+        `,
+      })}
+      ${section({
+        title: 'Cache desta mídia',
+        description: 'Remove os segmentos baixados. Os arquivos MP4 já exportados não são tocados.',
+        actions: button({ label: 'Limpar cache', ref: 'clearCache', variant: 'danger', disabled: true,
+                          reason: 'Nada em cache para remover.' }),
+        body: html`
+          ${resultLine({ message: '', ref: 'clearResult' })}
+          <details data-ref="exportDetails" hidden>
+            <summary>Detalhes da exportação</summary>
+            <div class="plugin-stack" data-ref="exports"></div>
+          </details>
         `,
       })}
       ${section({
@@ -468,21 +539,71 @@ export async function mountInspector(context) {
       return;
     }
     presentation = await context.request(`presentation?${new URLSearchParams({ media_id: item.id })}`);
-    const inventory = await context.request('cache');
-    const cached = inventory.media?.find(value => value.media_id === item.id);
-    const state = cached?.state || 'empty';
+    // Uma consulta escopada nesta midia.  Antes pedia o inventario inteiro --
+    // com faixas e representacoes de TODAS as midias -- para achar uma linha.
+    const data = await context.request(`cache/states?${new URLSearchParams({ media_ids: item.id })}`);
+    const cached = data.states?.[item.id];
+    downloaded = cached?.state === 'offline' || cached?.state === 'exported';
     render(view.status, html`
-      ${stateBadge(state)}
-      <span class="ui-result">${Math.round((cached?.coverage || 0) * 100)}% em cache
+      ${stateBadge(cached?.state || 'empty')}
+      <span class="ui-result">${Math.round((cached?.coverage || 0) * 100)}% dos segmentos
         · ${formatBytes(cached?.cached_bytes || 0)}</span>
     `);
-    const exportable = state === 'offline' || state === 'exported';
-    view.save.disabled = !exportable;
-    if (!exportable) view.save.title = 'Baixe a mídia primeiro: exportar precisa dos segmentos completos.';
+
+    if (cached?.cached_count) {
+      view.clearCache.disabled = false;
+      view.clearCache.removeAttribute('title');
+      setReason(view.clearCache, '');
+    } else {
+      view.clearCache.disabled = true;
+      setReason(view.clearCache, 'Nada em cache para remover.');
+    }
+
+    renderExports(cached?.exports || []);
+    syncIntent();
     renderTracks();
   }
 
-  /* --- Acoes ---------------------------------------------------------- */
+  /* --- Exportacoes ---------------------------------------------------- */
+
+  function renderExports(exports) {
+    view.exportDetails.hidden = !exports.length;
+    if (!exports.length) return;
+    render(view.exports, html`${exports.map(row => html`
+      <div class="plugin-stack">
+        <p class="ui-result">${new Date((row.created_at || 0) * 1000).toLocaleString('pt-BR')}
+          · ${formatBytes(row.size)}</p>
+        <p class="ui-result"><code>${row.path}</code></p>
+        <p class="ui-result">SHA-256 registrado: <code>${row.sha256}</code></p>
+      </div>
+    `)}`);
+  }
+
+  /* --- Acoes ----------------------------------------------------------
+   * Havia tres botoes concorrentes -- "Baixar para cache", "Salvar como MP4"
+   * e "Baixar e salvar como MP4" -- para duas decisoes.  Exportar nao e uma
+   * terceira operacao, e um sufixo do download: o backend ja trata assim,
+   * porque `export-mp4` completa os segmentos que faltam apesar do nome.
+   *
+   * Sobra um botao e uma caixa.  A linha de intencao diz o que o clique vai
+   * fazer, para o rotulo curto nunca mentir sobre o estado atual. */
+
+  function syncIntent() {
+    const exportToo = view.exportToo.checked;
+    if (downloaded && !exportToo) {
+      view.download.disabled = true;
+      setReason(view.download, 'Já está baixado. Marque a exportação para gravar um MP4.');
+      view.intent.textContent = '';
+      return;
+    }
+    view.download.disabled = false;
+    setReason(view.download, '');
+    view.intent.textContent = downloaded
+      ? 'Os segmentos já estão em cache; vai apenas gravar o MP4.'
+      : (exportToo
+          ? 'Vai baixar os segmentos e gravar um MP4 ao terminar.'
+          : 'Vai baixar os segmentos para o cache local.');
+  }
 
   async function start(operation, trigger) {
     await withBusy(trigger, 'Iniciando', async () => {
@@ -521,9 +642,35 @@ export async function mountInspector(context) {
   }
 
   if (playable) {
-    view.download.onclick = () => start('download', view.download);
-    view.save.onclick = () => start('export-mp4', view.save);
-    view.downloadSave.onclick = () => start('download-export', view.downloadSave);
+    view.exportToo.onchange = syncIntent;
+    view.download.onclick = () => start(view.exportToo.checked ? 'download-export' : 'download', view.download);
+
+    view.clearCache.onclick = async () => {
+      const confirmed = await context.confirm({
+        title: 'Remover o cache desta mídia?',
+        body: 'Os segmentos baixados serão apagados e precisarão ser baixados de novo. '
+            + 'Um MP4 já exportado não é afetado.',
+        confirmLabel: 'Remover', danger: true,
+      });
+      if (!confirmed) return;
+      await withBusy(view.clearCache, 'Removendo', async () => {
+        try {
+          const result = await context.request('cache/cleanup', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'media', media_ids: [item.id] }),
+          });
+          const skipped = result.skipped ? ` · ${result.skipped} não puderam ser removidos` : '';
+          view.clearResult.textContent =
+            `${result.removed} arquivo(s) removido(s) · ${formatBytes(result.bytes)} liberados${skipped}`;
+          view.clearResult.className = `ui-result ui-result--${result.skipped ? 'warning' : 'success'}`;
+          await loadAvailability();
+          await context.notifyChanged(item.id);
+        } catch (error) {
+          view.clearResult.textContent = error.message;
+          view.clearResult.className = 'ui-result ui-result--danger';
+        }
+      });
+    };
 
     view.subtitleUpload.onclick = () => withBusy(view.subtitleUpload, 'Enviando', async () => {
       const file = view.subtitleFile.files[0];

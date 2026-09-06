@@ -358,15 +358,70 @@ class CrunchyrollCache:
 
     @staticmethod
     def _valid_export(row) -> bool:
+        """O MP4 exportado ainda esta la, com o tamanho registrado.
+
+        Presenca e integridade sao perguntas diferentes.  Esta responde a
+        primeira, que e a que decide o rotulo "Exportado" -- e por isso e
+        consultada em lote, para uma pagina inteira de cards.
+
+        Antes lia o arquivo inteiro para conferir o SHA-256.  Isso tornava
+        `inventory()` proporcional ao tamanho de tudo que ja foi exportado, e
+        ele e chamado a cada abertura do painel e ao fim de cada job.  A
+        integridade continua verificavel sob demanda em `verify_export`, onde
+        o custo e escolhido por quem pediu.
+        """
         path = Path(row["path"])
         try:
-            if not path.is_file() or path.stat().st_size != row["size"]: return False
+            return path.is_file() and path.stat().st_size == row["size"]
+        except OSError:
+            return False
+
+    @staticmethod
+    def verify_export(row) -> bool:
+        """Confere o SHA-256 registrado, lendo o arquivo inteiro."""
+        path = Path(row["path"])
+        try:
+            if not path.is_file() or path.stat().st_size != row["size"]:
+                return False
             value = hashlib.sha256()
             with path.open("rb") as stream:
-                while chunk := stream.read(1024 * 1024): value.update(chunk)
-            digest = value.hexdigest()
-            return digest == row["sha256"]
-        except OSError: return False
+                while chunk := stream.read(1024 * 1024):
+                    value.update(chunk)
+            return value.hexdigest() == row["sha256"]
+        except OSError:
+            return False
+
+    def states(self, media_ids):
+        """`{media_id: {state, coverage}}` para os ids conhecidos do cache.
+
+        Existe para `decorateCard`: descobrir se um episodio esta baixado
+        exigia abrir o Inspetor um por um.  Devolve so o que o cache conhece
+        -- id ausente e "nunca tocado", e quem pergunta ja sabe disso sem
+        precisar de uma linha dizendo zero.
+        """
+        wanted = [str(value) for value in media_ids if value]
+        if not wanted:
+            return {}
+        result = {}
+        with self._connect() as db:
+            placeholders = ",".join("?" for _ in wanted)
+            rows = db.execute(f"SELECT * FROM media WHERE media_id IN ({placeholders})", wanted).fetchall()
+            for row in rows:
+                plan = db.execute("SELECT COUNT(*) count FROM segment_plan WHERE media_id=? AND revision=?",
+                                  (row["media_id"], row["revision"])).fetchone()["count"]
+                cached = db.execute("SELECT COUNT(*) count,COALESCE(SUM(size),0) bytes FROM segments "
+                                    "WHERE media_id=? AND revision=?",
+                                    (row["media_id"], row["revision"])).fetchone()
+                exports = [dict(export) for export in db.execute(
+                    "SELECT * FROM exports WHERE media_id=? ORDER BY created_at DESC", (row["media_id"],))]
+                result[row["media_id"]] = {
+                    "state": self._media_state(db, row),
+                    "coverage": cached["count"] / plan if plan else 0,
+                    "cached_count": cached["count"],
+                    "cached_bytes": cached["bytes"],
+                    "exports": exports,
+                }
+        return result
 
     @staticmethod
     def _has_complete_representation(db, media_id: str, revision: str, kind: str,

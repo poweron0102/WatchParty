@@ -216,11 +216,23 @@ class ScopeSeparationTests(unittest.TestCase):
     ENTITY_ACTIONS = ("download", "export-mp4", "download-export", "presentation", "subtitles/upload")
 
     #: Agem sobre a origem inteira: so as Ferramentas.
-    GLOBAL_ACTIONS = ("preferences", "catalog/refresh", "cache/cleanup", "cache/cleanup-preview")
+    GLOBAL_ACTIONS = ("preferences", "catalog/refresh", "cache/cleanup-preview")
+
+    #: `cache/cleanup` e a excecao: a MESMA rota serve os dois escopos, e quem
+    #: decide e o `mode` do payload.  Comparar pelo nome da rota daria um
+    #: veredito errado nos dois sentidos, entao ela tem testes proprios.
+    SCOPED_BY_PAYLOAD = {"cache/cleanup"}
 
     def _offered(self, module, panel):
-        """Acoes que o painel oferece, inclusive as passadas por variavel."""
-        body = plugin_regions(module.read_text(encoding="utf-8"), include_shared=False)[panel]
+        """Acoes que o painel oferece, inclusive as passadas por variavel.
+
+        Comentario nao e oferta: o texto que *explica* os tres botoes antigos
+        cita os rotulos deles, e sem descartar comentarios o teste leria isso
+        como se o painel ainda os oferecesse.
+        """
+        source = re.sub(r"//[^\n]*|/\*.*?\*/", " ",
+                        module.read_text(encoding="utf-8"), flags=re.S)
+        body = plugin_regions(source, include_shared=False)[panel]
         return plugin_requested_actions(body) | quoted_strings(body)
 
     def test_the_tools_panel_does_not_operate_a_single_media(self):
@@ -257,14 +269,110 @@ class ScopeSeparationTests(unittest.TestCase):
         for module in PLUGIN_MODULES:
             source = module.read_text(encoding="utf-8")
             regions = plugin_regions(source)
-            # `cache` e `jobs` sao leitura de estado, nao acao: os dois paineis
-            # legitimamente perguntam "como esta isto agora?".
-            readonly = {"cache", "jobs", "cache/summary"}
-            tools = plugin_requested_actions(regions["mount"]) - readonly
-            inspector = plugin_requested_actions(regions["mountInspector"]) - readonly
+            # Leitura de estado nao e acao: os dois paineis legitimamente
+            # perguntam "como esta isto agora?", e `cache/states` ainda por
+            # cima mora no hook de modulo, que conta para os dois.
+            readonly = {"cache", "jobs", "cache/summary", "cache/states"}
+            tools = plugin_requested_actions(regions["mount"]) - readonly - self.SCOPED_BY_PAYLOAD
+            inspector = plugin_requested_actions(regions["mountInspector"]) - readonly - self.SCOPED_BY_PAYLOAD
             shared = {action for action in tools & inspector if not action.startswith("jobs/")}
             with self.subTest(plugin=module.parent.name):
                 self.assertEqual(shared, set(), f"ação oferecida nos dois painéis: {sorted(shared)}")
+
+    def test_the_two_panels_clean_up_at_different_scopes(self):
+        """A mesma rota, escopos distintos -- e o payload que separa.
+
+        Se as Ferramentas voltarem a oferecer o modo por mídia, volta o
+        seletor de mídia, e com ele a redundância inteira.
+        """
+        source = re.sub(r"//[^\n]*|/\*.*?\*/", " ",
+                        (PLUGINS / "crunchyroll" / "host.mjs").read_text(encoding="utf-8"), flags=re.S)
+        modes = re.search(r"CLEANUP_MODES\s*=\s*\[(.*?)\];", source, re.S)
+        self.assertIsNotNone(modes, "a lista de modos das Ferramentas sumiu")
+        self.assertNotIn("'media'", modes.group(1),
+                         "limpar UMA mídia é ação de entidade e pertence ao Inspetor")
+
+        inspector = plugin_regions(source, include_shared=False)["mountInspector"]
+        self.assertRegex(inspector, r"mode:\s*'media'",
+                         "o Inspetor precisa limpar o cache no escopo da mídia aberta")
+
+
+class CollapsedActionTests(unittest.TestCase):
+    """Três ações concorrentes viraram um botão e uma caixa.
+
+    `download`, `export-mp4` e `download-export` eram três botões para duas
+    decisões.  Exportar não é uma terceira operação, é um sufixo do download --
+    o backend já trata assim, porque `export-mp4` completa os segmentos que
+    faltam apesar do nome.  A UI passou a dizer isso em vez de escondê-lo.
+    """
+
+    def setUp(self):
+        self.source = re.sub(
+            r"//[^\n]*|/\*.*?\*/", " ",
+            (PLUGINS / "crunchyroll" / "host.mjs").read_text(encoding="utf-8"), flags=re.S)
+        self.inspector = plugin_regions(self.source, include_shared=False)["mountInspector"]
+
+    def test_the_ui_never_asks_for_export_as_a_separate_operation(self):
+        """`export-mp4` continua no backend; deixa de ser um conceito na tela."""
+        self.assertNotRegex(
+            self.inspector, r"""['"]export-mp4['"]""",
+            "exportar é sufixo de download: use download-export",
+        )
+
+    def test_the_choice_is_a_checkbox_and_the_operation_follows_it(self):
+        self.assertRegex(self.inspector, r"type=\"checkbox\"[^>]*data-ref=\"exportToo\"")
+        self.assertRegex(
+            self.inspector,
+            r"exportToo\.checked\s*\?\s*'download-export'\s*:\s*'download'",
+            "a caixa é o que decide entre as duas operações do backend",
+        )
+
+    def test_the_button_explains_itself_instead_of_lying(self):
+        """Um rótulo curto sobre estado que muda precisa de uma linha que diga
+        o que o clique vai fazer agora."""
+        self.assertIn("syncIntent", self.inspector)
+        self.assertRegex(self.inspector, r"view\.exportToo\.onchange\s*=\s*syncIntent")
+
+
+class DecorateCardTests(unittest.TestCase):
+    """O estado de cache aparece no card, sem uma requisição por card.
+
+    O hook existia e estava ocioso no host desde sempre; descobrir se um
+    episódio estava baixado exigia abrir o Inspetor um por um.
+    """
+
+    def setUp(self):
+        self.source = (PLUGINS / "crunchyroll" / "host.mjs").read_text(encoding="utf-8")
+
+    def test_the_plugin_exports_the_hook_at_the_level_the_host_calls_it(self):
+        """`decorateCard` é lido de `sourceExtension`, o export do módulo --
+        devolvê-lo de `mount()` é o erro que deixou `catalogRendered` morto."""
+        self.assertRegex(self.source, r"export\s+function\s+decorateCard")
+        self.assertRegex(self.source, r"export\s+async\s+function\s+catalogRendered")
+
+    def test_the_host_hands_the_page_hooks_a_way_to_make_requests(self):
+        host = HOST_JS.read_text(encoding="utf-8")
+        self.assertRegex(host, r"decorateCard\?\.\([^)]*pluginPage\)")
+        self.assertRegex(host, r"catalogRendered\?\.\(state,\s*pluginPage\)")
+
+    def _hook_body(self, name):
+        match = re.search(rf"export (?:async )?function {name}\b.*?\n}}", self.source, re.S)
+        self.assertIsNotNone(match, f"{name} sumiu")
+        return match.group(0)
+
+    def test_the_page_is_resolved_in_one_request_not_one_per_card(self):
+        """Um selo por card não pode custar uma consulta por card.
+
+        `decorateCard` roda durante a renderização, antes de o plugin saber
+        qual é a página; por isso ele só cria o slot, e `catalogRendered`
+        resolve a página inteira de uma vez.
+        """
+        self.assertNotIn("request", self._hook_body("decorateCard"))
+        self.assertEqual(len(re.findall(r"context\.request\(", self._hook_body("catalogRendered"))), 1)
+
+    def test_a_card_without_cache_gets_no_badge(self):
+        """"Sem cache" em cada card de uma página inteira é ruído, não sinal."""
+        self.assertRegex(self._hook_body("catalogRendered"), r"state\s*===\s*'empty'")
 
 
 class HierarchyTests(unittest.TestCase):
