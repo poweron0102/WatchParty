@@ -11,7 +11,6 @@ import numpy as np
 from fastapi import HTTPException
 
 from media_sources.errors import InvalidSourceConfiguration
-from playback.store import SegmentStore
 
 from .source_core import DirectorySource, VIDEO_EXTENSIONS
 
@@ -20,28 +19,9 @@ class DirectoryPluginSource(DirectorySource):
     owns_cache = True
 
     def __init__(self, *args, **kwargs):
-        source_id = kwargs.pop("source_id")
+        kwargs.pop("source_id")
         super().__init__(*args, **kwargs)
         self._preview_jobs: dict[str, dict] = {}
-        self._revisions: dict[str, str] = {}
-        self._segment_store = SegmentStore(self._root / ".watchparty" / source_id / "playback")
-
-    async def inspect(self, media_id):
-        presentation = await super().inspect(media_id); self._revisions[media_id] = presentation.revision_seed; return presentation
-
-    def _cache_media_id(self, media_id): return f"{media_id}@{self._revisions.get(media_id, 'unknown')}"
-
-    def locate(self, media_id, demand): return self._segment_store.locate(self._cache_media_id(media_id), demand)
-
-    async def materialize(self, media_id, demand):
-        ready = self.locate(media_id, demand)
-        if ready: return ready
-        artifact = await super().materialize(media_id, demand)
-        published = await self._segment_store.publish(self._cache_media_id(media_id), demand, artifact)
-        if artifact.path != published.path:
-            try: artifact.path.unlink(missing_ok=True)
-            except OSError: pass
-        return published
 
     def _preview_target(self, media_id: str, entry_type: str, variant: str) -> tuple[Path, Path]:
         if variant not in {"poster", "thumbnail"} or entry_type not in {"collection", "playable"}:
@@ -153,12 +133,15 @@ class DirectoryPluginSource(DirectorySource):
 
 
 def create_source(_source_id: str, options: dict[str, Any]):
-    allowed = {"path", "ffmpeg_path", "transcode_profile", "hardware_acceleration"}
+    allowed = {"path", "ffmpeg_path", "transcode_profile", "hardware_acceleration", "memory_cache_bytes"}
     if set(options) - allowed or not isinstance(options.get("path"), str) or not options["path"].strip():
         raise InvalidSourceConfiguration("opções inválidas para a origem directory")
     acceleration = options.get("hardware_acceleration", "auto")
     if acceleration not in ("auto", "software"):
         raise InvalidSourceConfiguration("hardware_acceleration inválido")
+    memory = options.get('memory_cache_bytes', 256 * 1024 * 1024)
+    if isinstance(memory, bool) or not isinstance(memory, int) or memory < 0:
+        raise InvalidSourceConfiguration('memory_cache_bytes deve ser um inteiro não negativo')
     return DirectoryPluginSource(options["path"], options.get("ffmpeg_path", "ffmpeg.exe"),
-                                 options.get("transcode_profile", "chrome-h264-aac"), acceleration,
+                                 options.get("transcode_profile", "chrome-h264-aac"), acceleration, memory,
                                  source_id=_source_id)

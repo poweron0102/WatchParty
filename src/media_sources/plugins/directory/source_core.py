@@ -20,7 +20,8 @@ CONTENT_TYPES = {
 
 
 class DirectorySource:
-    def __init__(self, root: str | Path, ffmpeg_path="ffmpeg.exe", transcode_profile="chrome-h264-aac", hardware_acceleration="auto"):
+    def __init__(self, root: str | Path, ffmpeg_path="ffmpeg.exe", transcode_profile="chrome-h264-aac", hardware_acceleration="auto",
+                 memory_cache_bytes=256 * 1024 * 1024):
         try:
             self._root = Path(root).expanduser().resolve(strict=True)
         except (OSError, RuntimeError) as exc:
@@ -29,13 +30,16 @@ class DirectorySource:
             raise InvalidSourceConfiguration("o caminho configurado não é um diretório")
 
         from .playback import DirectoryPlaybackAdapter
-        self._playback = DirectoryPlaybackAdapter(self._root, ffmpeg_path, transcode_profile, hardware_acceleration)
+        self._playback = DirectoryPlaybackAdapter(self._root, ffmpeg_path, transcode_profile, hardware_acceleration, memory_cache_bytes)
 
     @property
     def playback_available(self): return self._playback.available
 
     async def inspect(self, media_id): return await self._playback.inspect(media_id)
     async def materialize(self, media_id, demand): return await self._playback.materialize(media_id, demand)
+    def locate(self, media_id, demand): return self._playback.locate(media_id, demand)
+    async def release(self, media_id): await self._playback.release(media_id)
+    async def aclose(self): await self._playback.aclose()
 
     def _resolve(self, opaque_id: str | None, *, must_exist: bool = True) -> Path:
         if not opaque_id:

@@ -43,7 +43,7 @@ class SegmentStore:
         existing = self.locate(media_id, demand)
         if existing:
             return existing
-        raw = await asyncio.to_thread(source.path.read_bytes)
+        raw = await source.read_bytes()
         digest = hashlib.sha256(raw).hexdigest()
         if source.size != len(raw) or source.sha256 != digest:
             raise ValueError("artefato de segmento inválido")

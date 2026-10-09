@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
@@ -64,10 +66,26 @@ class SegmentDemand:
 
 @dataclass(frozen=True)
 class SegmentArtifact:
-    path: Path
+    path: Path | None
     content_type: str
     size: int
     sha256: str
+    data: bytes | None = None
+
+    def __post_init__(self):
+        if (self.path is None) == (self.data is None):
+            raise ValueError('segmento deve conter exatamente um de path ou data')
+        if self.data is not None and (not isinstance(self.data, bytes) or len(self.data) != self.size):
+            raise ValueError('conteúdo ou tamanho do segmento inválido')
+
+    @classmethod
+    def from_bytes(cls, data: bytes, content_type: str) -> SegmentArtifact:
+        return cls(None, content_type, len(data), hashlib.sha256(data).hexdigest(), data)
+
+    async def read_bytes(self) -> bytes:
+        if self.data is not None:
+            return self.data
+        return await asyncio.to_thread(self.path.read_bytes)
 
 
 @dataclass(frozen=True)

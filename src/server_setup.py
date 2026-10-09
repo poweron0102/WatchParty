@@ -12,7 +12,11 @@ async def lifespan(_):
 
     if USE_CLOUDFLARE:
         asyncio.create_task(start_dns_updater())
-    yield
+    try:
+        yield
+    finally:
+        from http_routes import PLAYBACK
+        await PLAYBACK.aclose()
 
 app = fastapi.FastAPI(lifespan=lifespan)
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")

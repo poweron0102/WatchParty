@@ -28,8 +28,13 @@ O diretório deve existir e ser legível. IDs precisam ser únicos e podem conte
 3. Execute `python src/main.py` e abra `http://localhost:5467/host`.
 
 O playback usa um manifesto MPEG-DASH local e Shaka Player 5.2.0 hospedado pelo próprio
-WatchParty. A origem `directory` cria derivados quando FFmpeg/FFprobe estão disponíveis; sem
-eles, o catálogo continua navegável e anuncia playback indisponível.
+WatchParty. A origem `directory` gera segmentos por pipe e os guarda apenas em RAM,
+compartilhados entre os espectadores, sem escrever derivados no disco. Copia faixas
+H.264/AAC compatíveis e usa hardware disponível para as conversões necessárias,
+com alternativa por software. `memory_cache_bytes` limita a retenção por origem
+(padrão: 268435456 bytes, 256 MiB). FFmpeg e respostas em andamento usam memória
+adicional. Sem FFmpeg/FFprobe, o catálogo continua navegável e anuncia playback
+indisponível. Consulte `docs/media-source-plugins.md` para o contrato e as opções.
 
 Para uma origem privada `crunchyroll`, habilite o exemplo de `save.example.json`, informe o
 cookie `etp_rt` somente em `save.json` e mantenha `worker_path` como
@@ -55,7 +60,7 @@ Vídeos aceitos: MP4, MKV, WebM e AVI. Sidecars ficam junto ao vídeo nas conven
 
 ## Docker e TURN
 
-Copie `.env.example` para `.env`. O Compose monta `WATCHPARTY_MEDIA_DIR` em `/media` com leitura e escrita para `.previews` e `.watchparty`, e usa `docker/save.json` gravável para persistir o toggle administrativo. Para várias origens, adicione mounts graváveis e os respectivos caminhos internos ao arquivo JSON.
+Copie `.env.example` para `.env`. O Compose monta `WATCHPARTY_MEDIA_DIR` em `/media` com leitura e escrita para as ferramentas de `.previews`, e usa `docker/save.json` gravável para persistir o toggle administrativo. A reprodução local funciona com a biblioteca somente leitura; escrita é necessária apenas para administrar capas. Para várias origens, adicione mounts e os respectivos caminhos internos ao arquivo JSON.
 
 Execute `docker compose up -d --build`. Configure `TURN_HOST` e um `TURN_SECRET` longo; publique as portas TURN indicadas no Compose. O modo WebRTC pode ser alterado no painel do host.
 

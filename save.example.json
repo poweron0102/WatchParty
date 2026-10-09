@@ -20,7 +20,8 @@
                 "path": "C:\\caminho\\para\\seus\\videos",
                 "ffmpeg_path": "ffmpeg.exe",
                 "transcode_profile": "chrome-h264-aac",
-                "hardware_acceleration": "auto"
+                "hardware_acceleration": "auto",
+                "memory_cache_bytes": 268435456
             }
         },
         {

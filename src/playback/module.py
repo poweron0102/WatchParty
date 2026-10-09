@@ -45,6 +45,10 @@ class PlaybackModule:
             except KeyError as exc: raise PlaybackNotFound("origem não encontrada") from exc
             presentation = await origin.inspect(selection.media_id)
             revision = hashlib.sha256((selection.source_id + "\0" + presentation.revision_seed).encode()).hexdigest()[:24]
+            if self._active:
+                release = getattr(self._active.origin, 'release', None)
+                if release:
+                    await release(self._active.selection.media_id)
             async with self._lock:
                 if self._active and self._active.selection == selection and self._active.descriptor.revision == revision:
                     return self._active.descriptor
@@ -82,16 +86,24 @@ class PlaybackModule:
             artifact = ready or await asyncio.wait_for(self._planner.materialize(
                 active.selection.media_id, demand,
                 lambda: active.origin.materialize(active.selection.media_id, demand),
-                publish=False), self._timeout)
+                publish=False, namespace=active.descriptor.revision), self._timeout)
         except TimeoutError as exc: raise MaterializationTimeout("tempo de materialização esgotado") from exc
-        data = await asyncio.to_thread(artifact.path.read_bytes)
+        data = await artifact.read_bytes()
         mirror = self._canonical_demand(active, demand)
         if mirror and not self._locate(active, mirror):
             task = asyncio.create_task(self._planner.materialize(active.selection.media_id, mirror,
                 lambda: active.origin.materialize(active.selection.media_id, mirror),
-                publish=False))
+                publish=False, namespace=active.descriptor.revision))
             self._background.add(task); task.add_done_callback(self._background_finished)
         return _opened(data, artifact.content_type)
+
+    async def aclose(self):
+        await self._planner.aclose()
+        await asyncio.gather(*self._background, return_exceptions=True)
+        for origin in self._origins.values():
+            close = getattr(origin, 'aclose', None)
+            if close:
+                await close()
 
     def _background_finished(self, task):
         self._background.discard(task)

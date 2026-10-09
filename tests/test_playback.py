@@ -15,6 +15,7 @@ from playback.models import PlaybackExpired, PlaybackPaused
 from playback.manifest import build_mpd
 from playback.scheduler import MaterializationPlanner
 from playback.models import SegmentDemand
+from playback.models import DemandPriority
 from media_sources.errors import SourceUnavailable
 from media_sources.plugins.directory.playback import _split_fragmented_mp4
 
@@ -62,6 +63,58 @@ class PlaybackTests(unittest.IsolatedAsyncioTestCase):
             self.module.select(PlaybackSelection("source", "media")) for _ in range(2)))
         self.assertEqual(self.origin.inspections, 1)
         self.assertEqual(first.playback_id, second.playback_id)
+
+    async def test_different_priorities_share_the_same_conversion(self):
+        planner = MaterializationPlanner(None)
+        entered, release = asyncio.Event(), asyncio.Event()
+        calls = 0
+        async def convert():
+            nonlocal calls
+            calls += 1
+            entered.set()
+            await release.wait()
+            return await self.origin.materialize('episode', SegmentDemand('video', 'v1', '0'))
+        first = asyncio.create_task(planner.materialize('episode', SegmentDemand('video', 'v1', '0'), convert, publish=False))
+        await entered.wait()
+        second = asyncio.create_task(planner.materialize('episode', SegmentDemand('video', 'v1', '0', DemandPriority.CANONICAL), convert, publish=False))
+        await asyncio.sleep(.02)
+        release.set()
+        await asyncio.gather(first, second)
+        self.assertEqual(calls, 1, 'playback and prefetch must share the same encoder')
+
+    async def test_memory_artifact_is_served_without_reading_a_file(self):
+        from unittest.mock import patch
+        async def memory(media_id, demand):
+            return SegmentArtifact.from_bytes(b'memory video', 'video/mp4')
+        self.origin.materialize = memory
+        descriptor = await self.module.select(PlaybackSelection('source', 'media'))
+        resource = next(iter(self.module._active.resources))
+        with patch.object(Path, 'read_bytes', side_effect=AssertionError('disk read')):
+            opened = await self.module.open(descriptor.playback_id, resource, ResourceRequest())
+            self.assertEqual(b''.join([part async for part in opened.chunks]), b'memory video')
+
+    async def test_namespaces_do_not_share_artifacts(self):
+        planner = MaterializationPlanner(None)
+        async def one():
+            await asyncio.sleep(.01)
+            return SegmentArtifact.from_bytes(b'one', 'video/mp4')
+        async def two():
+            await asyncio.sleep(.01)
+            return SegmentArtifact.from_bytes(b'two', 'video/mp4')
+        demand = SegmentDemand('video', 'v', '0')
+        first, second = await asyncio.gather(
+            planner.materialize('same-name', demand, one, publish=False, namespace='source1-revision1'),
+            planner.materialize('same-name', demand, two, publish=False, namespace='source2-revision1'))
+        self.assertEqual((first.data, second.data), (b'one', b'two'))
+
+    async def test_file_store_can_publish_memory_artifacts(self):
+        from playback.store import SegmentStore
+        store = SegmentStore(Path(self.temp.name) / 'store')
+        artifact = SegmentArtifact.from_bytes(b'keep old disk plugins working', 'video/mp4')
+        demand = SegmentDemand('video', 'v', '0')
+        published = await store.publish('media', demand, artifact)
+        self.assertEqual(await published.read_bytes(), artifact.data)
+        self.assertEqual(await store.locate('media', demand).read_bytes(), artifact.data)
 
     async def test_timed_out_download_failure_cleans_single_flight(self):
         planner = MaterializationPlanner(None)
