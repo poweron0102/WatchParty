@@ -25,12 +25,21 @@ class MaterializationPlanner:
             if task is None:
                 task = asyncio.create_task(self._run(media_id, demand, factory, publish))
                 self._flights[key] = task
+                task.add_done_callback(lambda done: self._finished(key, done))
         try:
             return await asyncio.shield(task)
         finally:
             if task.done():
                 async with self._lock:
                     if self._flights.get(key) is task: self._flights.pop(key, None)
+
+    def _finished(self, key, task):
+        # A timed-out HTTP caller leaves the shielded download running. Clean up
+        # even when there are no callers left to retrieve its eventual failure.
+        if self._flights.get(key) is task:
+            self._flights.pop(key, None)
+        if not task.cancelled():
+            task.exception()
 
     async def _run(self, media_id, demand, factory, publish):
         async with self._slots:

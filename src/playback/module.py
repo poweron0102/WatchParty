@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import secrets
 from dataclasses import dataclass
 
@@ -89,8 +90,13 @@ class PlaybackModule:
             task = asyncio.create_task(self._planner.materialize(active.selection.media_id, mirror,
                 lambda: active.origin.materialize(active.selection.media_id, mirror),
                 publish=False))
-            self._background.add(task); task.add_done_callback(self._background.discard)
+            self._background.add(task); task.add_done_callback(self._background_finished)
         return _opened(data, artifact.content_type)
+
+    def _background_finished(self, task):
+        self._background.discard(task)
+        if not task.cancelled() and (error := task.exception()) is not None:
+            logging.getLogger(__name__).warning("Materialização em segundo plano indisponível: %s", type(error).__name__)
 
     def _locate(self, active: _Active, demand: SegmentDemand):
         locate = getattr(active.origin, "locate", None)

@@ -43,6 +43,10 @@ type event struct {
 	Stage         string        `json:"stage,omitempty"`
 	Code          string        `json:"code,omitempty"`
 	Message       string        `json:"message,omitempty"`
+	Status        int           `json:"status,omitempty"`
+	Operation     string        `json:"operation,omitempty"`
+	Attempt       int           `json:"attempt,omitempty"`
+	RetryAfter    int64         `json:"retry_after,omitempty"`
 	Path          string        `json:"path,omitempty"`
 	ContentType   string        `json:"content_type,omitempty"`
 	SHA256        string        `json:"sha256,omitempty"`

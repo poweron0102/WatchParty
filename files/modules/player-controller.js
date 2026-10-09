@@ -23,7 +23,10 @@ export class PlayerController {
         });
         this.overlay = new shaka.ui.Overlay(this.engine, video.parentElement, video);
         this.overlay.configure({ overflowMenuButtons: ['quality', 'language', 'captions', 'playback_rate', 'picture_in_picture'] });
-        this.engine.configure({ streaming: { bufferingGoal: 30, rebufferingGoal: 2 }, abr: { enabled: true } });
+        this.engine.configure({ streaming: {
+            bufferingGoal: 30, rebufferingGoal: 2,
+            retryParameters: { maxAttempts: 4, baseDelay: 1000, backoffFactor: 2, timeout: 45000, stallTimeout: 0 },
+        }, abr: { enabled: true } });
     }
     async load(url) {
         this.media.srcObject = null; await this.ready;

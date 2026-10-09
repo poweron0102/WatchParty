@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -31,22 +32,63 @@ func newWorker(out io.Writer) *worker {
 	return &worker{active: map[string]*mediaState{}, writer: json.NewEncoder(out), lastDemand: time.Now(), stop: make(chan struct{})}
 }
 func (w *worker) emit(e event) { w.output.Lock(); defer w.output.Unlock(); _ = w.writer.Encode(e) }
-func (w *worker) fail(c command, code string, err error) {
-	fmt.Fprintf(os.Stderr, "[cr-worker] command=%s media=%s code=%s error=%s\n", c.Command, c.MediaKey, code, sanitize(err))
+func (w *worker) fail(c command, code string, err error, stage ...string) {
 	e := response(c, "failed")
 	e.Code = code
-	e.Message = sanitize(err)
+	e.Message = w.safeError(err)
+	if len(stage) > 0 {
+		e.Stage = stage[0]
+	}
+	var upstream *upstreamError
+	if errors.As(err, &upstream) {
+		e.Status, e.Operation, e.Attempt = upstream.Status, upstream.Operation, upstream.Attempt
+		e.RetryAfter = retrySeconds(upstream.RetryAfter)
+	}
+	fmt.Fprintf(os.Stderr, "[cr-worker] command=%s media=%s track=%s representation=%s segment=%s priority=%d stage=%s status=%d attempt=%d code=%s error=%s\n",
+		safeField(c.Command), safeField(c.MediaKey), safeField(c.Demand.TrackID), safeField(c.Demand.RepresentationID), safeField(c.Demand.SegmentIdentity), c.Demand.Priority, e.Stage, e.Status, e.Attempt, code, e.Message)
 	w.emit(e)
 }
+
+var diagnosticURL = regexp.MustCompile(`https?://[^\s]+`)
+var diagnosticControl = regexp.MustCompile(`[\s\x00-\x1f]+`)
+
+func safeField(value string) string {
+	value = diagnosticControl.ReplaceAllString(value, "_")
+	if len(value) > 160 {
+		value = value[:160]
+	}
+	return value
+}
+
 func sanitize(err error) string {
 	if err == nil {
 		return "unknown failure"
 	}
-	s := err.Error()
+	s := diagnosticURL.ReplaceAllString(err.Error(), "<url>")
+	s = diagnosticControl.ReplaceAllString(s, " ")
 	if len(s) > 240 {
 		s = s[:240]
 	}
 	return s
+}
+
+func (w *worker) safeError(err error) string {
+	if err == nil {
+		return "unknown failure"
+	}
+	message := err.Error()
+	secrets := []string{w.opts.CachePath, w.opts.ClientIDPath, w.opts.PrivateKeyPath, w.opts.WidevineDevicePath}
+	if w.api != nil {
+		w.api.mu.Lock()
+		secrets = append(secrets, w.api.cookie, w.api.token)
+		w.api.mu.Unlock()
+	}
+	for _, secret := range secrets {
+		if secret != "" {
+			message = strings.ReplaceAll(message, secret, "<redacted>")
+		}
+	}
+	return sanitize(errors.New(message))
 }
 
 func (w *worker) handle(c command) {
@@ -65,20 +107,22 @@ func (w *worker) handle(c command) {
 		e := response(c, "completed")
 		w.emit(e)
 	case "inspect_version":
-		stage := func(name string) { e := response(c, "stage"); e.Stage = name; w.emit(e) }
+		lastStage := "inspect"
+		stage := func(name string) { lastStage = name; e := response(c, "stage"); e.Stage = name; w.emit(e) }
 		p, err := w.inspect(c.MediaKey, stage)
 		if err != nil {
-			w.fail(c, "inspect_failed", err)
+			w.fail(c, "inspect_failed", err, lastStage)
 			return
 		}
 		e := response(c, "completed")
 		e.Presentation = &p
 		w.emit(e)
 	case "materialize":
-		stage := func(name string) { e := response(c, "stage"); e.Stage = name; w.emit(e) }
+		lastStage := "inspect"
+		stage := func(name string) { lastStage = name; e := response(c, "stage"); e.Stage = name; w.emit(e) }
 		path, ctype, digest, err := w.materialize(c.MediaKey, c.Demand, stage)
 		if err != nil {
-			w.fail(c, "materialize_failed", err)
+			w.fail(c, "materialize_failed", err, lastStage)
 			return
 		}
 		e := response(c, "asset")
@@ -114,6 +158,14 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 	stage("open_playback")
 	var p presentation
 	versions := map[string]*versionState{}
+	published := false
+	defer func() {
+		if !published {
+			for _, version := range versions {
+				w.api.release(version.contentID, version.stream.Token)
+			}
+		}
+	}()
 	seenAudio := map[string]bool{}
 	seenSubtitle := map[string]bool{}
 	discovery, err := w.api.openPlayback(mediaKey, "")
@@ -142,13 +194,11 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 			continue
 		}
 		stage("download_manifest")
-		raw, _, err := w.api.request("GET", stream.URL, nil, map[string]string{
+		raw, _, err := w.api.requestFor("manifest", "GET", stream.URL, nil, map[string]string{
 			"Origin": "https://static.crunchyroll.com", "Referer": "https://static.crunchyroll.com/",
 		})
 		if err != nil {
-		}
-		if err != nil {
-			w.api.release(mediaKey, stream.Token)
+			w.api.release(playbackID, stream.Token)
 			if index == 0 {
 				return presentation{}, err
 			}
@@ -161,14 +211,14 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 		versionID := fmt.Sprintf("%s@%s", playbackID, language)
 		parsed, pssh, err := parseMPD(raw, stream.URL, versionID, language)
 		if err != nil {
-			w.api.release(mediaKey, stream.Token)
+			w.api.release(playbackID, stream.Token)
 			if index == 0 {
 				return presentation{}, err
 			}
 			continue
 		}
 		if err := w.expandSegmentBases(&parsed); err != nil {
-			w.api.release(mediaKey, stream.Token)
+			w.api.release(playbackID, stream.Token)
 			if index == 0 {
 				return presentation{}, err
 			}
@@ -221,6 +271,7 @@ func (w *worker) inspect(mediaKey string, stage func(string)) (presentation, err
 	state := &mediaState{mediaKey: mediaKey, present: p, versions: versions}
 	w.mu.Lock()
 	w.active[mediaKey] = state
+	published = true
 	w.lastDemand = time.Now()
 	w.mu.Unlock()
 	return publicPresentation(p), nil
@@ -325,7 +376,7 @@ func (w *worker) materialize(mediaKey string, d demand, stage func(string)) (str
 	}
 	if strings.HasPrefix(d.TrackID, "subtitle:") {
 		stage("download_subtitle")
-		raw, _, downloadErr := w.api.request("GET", found.initURL, nil, map[string]string{"Origin": "https://static.crunchyroll.com", "Referer": "https://static.crunchyroll.com/"})
+		raw, _, downloadErr := w.api.requestFor("subtitle", "GET", found.initURL, nil, map[string]string{"Origin": "https://static.crunchyroll.com", "Referer": "https://static.crunchyroll.com/"})
 		if downloadErr != nil {
 			return "", "", "", downloadErr
 		}
@@ -442,6 +493,10 @@ func (w *worker) requestRange(target, value string) ([]byte, error) {
 				lastErr = validationErr
 			}
 		} else {
+			var incomplete *responseReadError
+			if !errors.As(requestErr, &incomplete) {
+				return nil, requestErr
+			}
 			lastErr = requestErr
 		}
 		if attempt+1 < attempts {

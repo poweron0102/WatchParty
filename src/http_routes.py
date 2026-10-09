@@ -404,6 +404,9 @@ async def playback_asset(request: Request, playback_id: str, resource_id: str):
     except (PlaybackNotFound, InvalidPlaybackResource): raise fastapi.HTTPException(404, "Recurso não encontrado.")
     except PlaybackPaused: raise fastapi.HTTPException(409, "Materialização pausada.", headers={"X-WatchParty-State": "download-paused"})
     except MaterializationTimeout: raise fastapi.HTTPException(503, "Recurso ainda não está pronto.", headers={"Retry-After": "1"})
+    except (SourceUnavailable, SourceReadError) as exc:
+        raise fastapi.HTTPException(503, "Origem temporariamente indisponível.",
+                                    headers={"Retry-After": str(getattr(exc, "retry_after", 1))}) from exc
     headers = {"Content-Length": str(opened.content_length), "Cache-Control": "private, max-age=31536000, immutable"}
     if resource_id == "manifest.mpd": headers["Cache-Control"] = "private, no-cache"
     if request.method == "HEAD": return fastapi.Response(media_type=opened.content_type, headers=headers)

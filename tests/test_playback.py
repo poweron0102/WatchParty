@@ -13,6 +13,9 @@ from playback import (OriginPresentation, OriginRepresentation, OriginSegment, O
                       PlaybackModule, PlaybackSelection, ResourceRequest, SegmentArtifact)
 from playback.models import PlaybackExpired, PlaybackPaused
 from playback.manifest import build_mpd
+from playback.scheduler import MaterializationPlanner
+from playback.models import SegmentDemand
+from media_sources.errors import SourceUnavailable
 from media_sources.plugins.directory.playback import _split_fragmented_mp4
 
 
@@ -59,6 +62,35 @@ class PlaybackTests(unittest.IsolatedAsyncioTestCase):
             self.module.select(PlaybackSelection("source", "media")) for _ in range(2)))
         self.assertEqual(self.origin.inspections, 1)
         self.assertEqual(first.playback_id, second.playback_id)
+
+    async def test_timed_out_download_failure_cleans_single_flight(self):
+        planner = MaterializationPlanner(None)
+        release = asyncio.Event()
+        async def fail():
+            await release.wait()
+            raise SourceUnavailable('remote failure')
+        demand = SegmentDemand('video', 'v1', 's1')
+        with self.assertRaises(TimeoutError):
+            await asyncio.wait_for(planner.materialize('media', demand, fail, publish=False), .01)
+        self.assertEqual(len(planner._flights), 1)
+        task = next(iter(planner._flights.values()))
+        release.set()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        self.assertEqual(planner._flights, {})
+        self.assertFalse(task._log_traceback, 'orphaned download exception was not consumed')
+
+    async def test_background_failure_is_consumed_and_removed(self):
+        async def fail(): raise SourceUnavailable('sensitive URL')
+        task = asyncio.create_task(fail())
+        self.module._background.add(task)
+        task.add_done_callback(self.module._background_finished)
+        with self.assertLogs('playback.module', level='WARNING') as output:
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+        self.assertEqual(self.module._background, set())
+        self.assertFalse(task._log_traceback)
+        self.assertNotIn('sensitive', ''.join(output.output))
 
     def test_directory_fmp4_is_split_between_init_and_media(self):
         def box(kind, payload=b""):

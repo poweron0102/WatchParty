@@ -11,7 +11,7 @@ from pathlib import Path
 
 from playback.models import (OriginPresentation, OriginRepresentation, OriginSegment,
                              OriginTrack, SegmentArtifact, SegmentDemand)
-from media_sources.errors import SourceUnavailable
+from media_sources.errors import SourceUnavailable, UpstreamUnavailable
 
 
 class CrunchyrollWorkerClient:
@@ -30,7 +30,8 @@ class CrunchyrollWorkerClient:
         for value in (self.cookie, self.options.get("cache_path"), self.options.get("client_id_path"),
                       self.options.get("private_key_path"), self.options.get("widevine_device_path")):
             if value: safe = safe.replace(str(value), "<redacted>")
-        return re.sub(r"https?://\S+", "<url>", safe)[:240]
+        safe = re.sub(r"https?://\S+", "<url>", safe)
+        return re.sub(r"[\x00-\x1f\x7f]+", " ", safe)[:240]
 
     async def _start(self):
         async with self._start_lock:
@@ -55,11 +56,21 @@ class CrunchyrollWorkerClient:
             try: message = json.loads(line)
             except ValueError: continue
             request_id = message.get("request_id"); future = self._pending.get(request_id)
-            if not future: continue
+            if not future or future.done(): continue
             if message.get("event") == "failed":
                 code = message.get("code", "worker_failed")
-                print(f"Crunchyroll worker [{code}]: {self._safe_diagnostic(message.get('message'))}", file=sys.stderr)
-                future.set_exception(SourceUnavailable("worker não pôde materializar o recurso"))
+                context = self._pending_context.get(request_id, "")
+                diagnostic = " ".join(f"{key}={self._safe_diagnostic(message[key])}"
+                                      for key in ("stage", "operation", "status", "attempt", "retry_after") if key in message)
+                print(f"Crunchyroll worker [{self._safe_diagnostic(code)}]: "
+                      f"{self._safe_diagnostic(message.get('message'))} {context} {diagnostic}", file=sys.stderr)
+                if "status" in message or "operation" in message:
+                    future.set_exception(UpstreamUnavailable(
+                        status=int(message.get("status") or 0), operation=message.get("operation", ""),
+                        retry_after=int(message.get("retry_after") or 1), attempt=int(message.get("attempt") or 0),
+                        stage=message.get("stage", "")))
+                else:
+                    future.set_exception(SourceUnavailable("worker não pôde materializar o recurso"))
             elif message.get("event") == "stage":
                 context = self._pending_context.get(request_id, "")
                 suffix = f" {context}" if context else ""
