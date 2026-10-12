@@ -1,0 +1,116 @@
+/* Tokens compartilhados pelas tres paginas (/, /party, /host).
+ *
+ * Antes deste arquivo existiam tres sistemas paralelos e incompativeis: um
+ * em party.css, uma copia byte-a-byte dele embutida em host.html, e um
+ * vocabulario completamente diferente em style.css.  A aplicacao nao tinha
+ * uma identidade visual -- tinha tres.
+ *
+ * A base adotada e a que era usada no login, por ser a melhor das duas
+ * paletas: neutro frio com profundidade real entre as camadas, em vez do
+ * cinza chapado #121212/#1e1e1e/#2c2c2c com o azul padrao do Bootstrap.
+ *
+ * Regra de cor: --accent identifica o produto e marca a acao primaria.
+ * As cores de estado significam estado e nada mais.  Vermelho e reservado
+ * a erro e acao destrutiva -- se tudo puder ficar vermelho, vermelho para
+ * de avisar.
+ */
+
+:root {
+    /* Superficies, da mais funda para a mais elevada */
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-soft: #202530;
+    --panel-raised: #262c39;
+
+    /* Texto */
+    --text: #f4f7fb;
+    --muted: #a7b0bf;
+    --faint: #7b8698;
+
+    /* Traços */
+    --line: #303744;
+    --line-strong: #3d4557;
+
+    /* Acento: identidade e acao primaria */
+    --accent: #2f8cff;
+    --accent-hover: #1d6fd3;
+    --accent-soft: rgba(47, 140, 255, 0.14);
+    --on-accent: #ffffff;
+
+    /* Semantica de mensagem */
+    --danger: #ff6b6b;
+    --danger-hover: #e35555;
+    --danger-soft: rgba(255, 107, 107, 0.14);
+    --warning: #f0b429;
+    --warning-soft: rgba(240, 180, 41, 0.14);
+    --success: #3ecf8e;
+    --success-soft: rgba(62, 207, 142, 0.14);
+
+    /* Estado de cache de uma midia.
+     * Deliberadamente fora da escala de mensagem: "parcial" nao e um aviso
+     * e "sem cache" nao e um erro -- sao apenas situacoes. */
+    --state-empty: var(--faint);
+    --state-empty-soft: rgba(123, 134, 152, 0.16);
+    --state-partial: var(--warning);
+    --state-partial-soft: var(--warning-soft);
+    --state-cached: var(--success);
+    --state-cached-soft: var(--success-soft);
+    --state-exported: var(--accent);
+    --state-exported-soft: var(--accent-soft);
+
+    /* Destaque de host no chat, preservado do party.css */
+    --host-badge-bg: #ffc107;
+    --host-badge-text: #121212;
+
+    /* Tipografia */
+    --font-sans: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --text-xs: 0.75rem;
+    --text-sm: 0.875rem;
+    --text-base: 1rem;
+    --text-lg: 1.125rem;
+    --text-xl: 1.35rem;
+    --text-2xl: 1.6rem;
+
+    /* Espacamento: escala unica, para o ritmo vertical parar de ser
+     * inventado caso a caso. */
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.5rem;
+    --space-6: 2rem;
+
+    /* Forma e profundidade */
+    --radius-sm: 0.375rem;
+    --radius: 0.5rem;
+    --radius-lg: 0.75rem;
+    --radius-pill: 999px;
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.22);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.28);
+    --shadow-lg: 0 24px 70px rgba(0, 0, 0, 0.34);
+    /* Nome sem sufixo mantido no valor original do login, que ja o usava. */
+    --shadow: var(--shadow-lg);
+
+    /* Camadas */
+    --z-sticky: 10;
+    --z-overlay: 40;
+    --z-toast: 60;
+}
+
+/* Compatibilidade: nomes antigos apontando para os tokens novos.
+ *
+ * party.css, chat.css e host.html referenciam estes nomes em centenas de
+ * lugares.  Mante-los como alias permite unificar a paleta agora e migrar
+ * as referencias por arquivo, sem um commit gigante que ninguem consegue
+ * revisar.  Sao temporarios: a etapa que migrar o ultimo consumidor de
+ * cada nome deve remove-lo daqui.
+ */
+:root {
+    --bg-primary: var(--bg);
+    --bg-secondary: var(--panel);
+    --bg-tertiary: var(--panel-soft);
+    --text-primary: var(--text);
+    --text-secondary: var(--muted);
+    --border-color: var(--line);
+    --accent-color: var(--accent);
+}

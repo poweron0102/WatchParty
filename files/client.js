@@ -1,15 +1,20 @@
 import { initializeChat } from './chat/chat.js';
 import { showNotification } from './modules/notifications.js';
-import { loadRtcConfig, setSocketIdGetter, closePeerConnection, handleAudioSignal } from './modules/webrtc.js';
+import { setSocketIdGetter, closePeerConnection, handleAudioSignal } from './modules/webrtc.js';
 import { closeScreenShareConnection, createScreenShareConnection, getScreenShareSessionId,
          isScreenShareVideo, setScreenShareSession, stopScreenShare, getScreenStream,
          handleScreenSignal } from './modules/screen-share.js';
 import { setupDubListeners, handleSyncState, handleSyncEvent, handleForceSync } from './modules/video-sync.js';
 import { updateStatusIndicator, setupHostUI } from './modules/host-ui.js';
+import { PlayerController } from './modules/player-controller.js';
 
 const socket = io();
-const player = new Plyr('#player', { tooltips: { controls: true, seek: true } });
-const dubPlayer = document.getElementById('dub-player');
+const player = new PlayerController(document.getElementById('player'));
+player.media.addEventListener('shaka-error', event => {
+    const code = event.detail?.code ? ` (código ${event.detail.code})` : '';
+    showNotification(`Falha no player${code}.`, 'error');
+});
+const dubPlayer = { pause(){}, play(){ return Promise.resolve(); }, currentTime: 0 };
 const statusIndicator = document.getElementById('status-indicator');
 const audioControlsContainer = document.getElementById('audio-controls-container');
 const dubSelector = document.getElementById('dub-selector');
@@ -29,7 +34,6 @@ if (!userName) window.location.href = '/';
 socket.emit('join_room', { name: userName, pfp: userPfp });
 
 setSocketIdGetter(() => socket.id);
-loadRtcConfig();
 
 document.addEventListener('DOMContentLoaded', () => {
     showNotification(`Bem-vindo à party, <strong>${userName}</strong>!`, 'success');

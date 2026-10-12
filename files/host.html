@@ -1,175 +1,153 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel do Host - Watch Party</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="icon" type="image/png" href="system_avatar.png">
-    <style>
-        :root {
-            --bg-primary: #121212;
-            --bg-secondary: #1e1e1e;
-            --bg-tertiary: #2c2c2c;
-            --text-primary: #e0e0e0;
-            --text-secondary: #b3b3b3;
-            --border-color: #333;
-            --accent-color: #007bff;
-            --accent-hover: #0056b3;
-        }
-        body { font-family: 'Inter', sans-serif; background-color: var(--bg-primary); color: var(--text-primary); }
-        .brand { color: var(--accent-color); }
-        .bg-brand { background-color: var(--accent-color); }
-        .bg-brand:hover { background-color: var(--accent-hover); }
-        .border-brand { border-color: var(--accent-color); }
-        .ring-brand { --tw-ring-color: var(--accent-color); }
-        .bg-card { background-color: var(--bg-secondary); }
-        .bg-input { background-color: var(--bg-tertiary); }
-        .border-input { border-color: var(--border-color); }
-        .media-grid-layout {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-            gap: 1rem;
-        }
-        #video-grid.media-grid-layout {
-            /* Aumenta o tamanho mínimo dos itens de vídeo para dar mais destaque */
-            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-        }
-        .media-item {
-            position: relative;
-            cursor: pointer;
-            border-radius: 0.5rem;
-            overflow: hidden; /* Garante que os cantos arredondados do banner sejam cortados */
-            background-color: var(--bg-tertiary);
-            transition: transform 0.2s ease-in-out;
-            /* Adicionado para o tooltip */
-        }
-        .media-item:hover {
-            transform: scale(1.05);
-            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3), 0 4px 6px -2px rgba(0,0,0,0.2);
-        }
-        .media-item img.banner {
-            width: 100%;
-            height: auto;
-            object-fit: cover;
-            display: block;
-            border-radius: 0.5rem 0.5rem 0 0;
-        }
-        .media-item.folder img.banner {
-            aspect-ratio: 2 / 3; /* Proporção de poster/banner */
-        }
-        .media-item.video img.banner {
-            aspect-ratio: 16 / 9; /* Proporção de vídeo */
-        }
-        .media-item .file-name {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            font-size: 0.875rem;
-            padding: 0.75rem;
-            text-align: center;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            background-color: rgba(30, 30, 30, 0.7);
-            backdrop-filter: blur(4px);
-        }
-        .media-item .file-name:hover {
-            white-space: normal;
-        }
-        .media-item .type-indicator {
-            position: absolute;
-            top: 0.5rem;
-            left: 0.5rem;
-            background-color: rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(5px);
-            border-radius: 0.375rem;
-            padding: 0.25rem 0.5rem;
-            display: flex;
-            align-items: center;
-            gap: 0.25rem;
-            font-size: 0.75rem;
-            font-weight: 500;
-        }
-    </style>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel do Host - Watch Party</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" type="image/png" href="system_avatar.png">
+<link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/base.css">
+<link rel="stylesheet" href="styles/components.css">
+<link rel="stylesheet" href="styles/host.css">
 </head>
 <body>
-    <div class="container mx-auto p-4 md:p-8 max-w-7xl">
-        <header class="mb-8">
-            <h1 class="text-4xl font-bold mb-2" style="color: var(--text-primary);">Painel do Host</h1>
-            <p class="text-lg" style="color: var(--text-secondary);">Gerencie sua sessão de Watch Party e selecione o conteúdo para todos.</p>
-            <a href="/party" target="_blank" class="font-semibold brand hover:underline">Assista aqui</a>
-        </header>
+<div class="host-shell" data-testid="host-shell">
 
-        <main class="grid grid-cols-1 gap-6 lg:gap-8">
-            <!-- Coluna da Esquerda: Widgets -->
-            <div class="flex flex-col gap-6">
-                <!-- Card: Link de Convite -->
-                <div class="bg-card p-6 rounded-lg shadow-lg">
-                    <h2 class="text-xl font-semibold mb-4" style="color: var(--text-primary);">Link de Convite</h2>
-                    <div class="flex gap-2">
-                        <input type="text" id="invite-link-field" value="Carregando..." readonly class="w-full bg-input border border-input rounded-md px-3 py-2 focus:outline-none focus:ring-2 ring-brand">
-                        <button id="copy-link-btn" class="bg-brand text-white px-4 py-2 rounded-md font-semibold flex items-center gap-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--bg-secondary)] ring-brand">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z"></path><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z"></path></svg>
-                            <span>Copiar</span>
-                        </button>
-                    </div>
-                </div>
+<header class="host-header" data-testid="host-header">
+  <div class="host-brand">
+    <a href="/party" title="Abrir Watch Party"><img src="system_avatar.png" alt="Watch Party"></a>
+    <div>
+      <h1>Painel do Host</h1>
+      <p>Gerencie sua sessão de Watch Party e selecione o conteúdo para todos.</p>
+    </div>
+  </div>
+  <a href="/party" target="_blank" class="host-party-link">Assista aqui <span aria-hidden="true">↗</span></a>
+</header>
 
-                <!-- Card: Definir por URL -->
-                <div class="bg-card p-6 rounded-lg shadow-lg">
-                    <h2 class="text-xl font-semibold mb-4" style="color: var(--text-primary);">Definir Vídeo por URL</h2>
-                    <div class="flex flex-col gap-3">
-                        <input type="text" id="video-url-field" placeholder="Cole a URL de um vídeo (.mp4, .mkv, etc)" class="w-full bg-input border border-input rounded-md px-3 py-2 focus:outline-none focus:ring-2 ring-brand">
-                        <button id="set-url-btn" class="w-full bg-brand text-white px-4 py-2 rounded-md font-semibold flex items-center justify-center gap-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--bg-secondary)] ring-brand">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z" clip-rule="evenodd"></path></svg>
-                            <span>Definir Vídeo</span>
-                        </button>
-                    </div>
-                </div>
+<div id="status-message" class="host-status" role="status" hidden></div>
 
-            </div>
+<main id="host-main-grid" class="host-grid">
 
-            <!-- Coluna da Direita: Explorador de Mídia -->
-            <div class="bg-card p-6 rounded-lg shadow-lg h-full flex flex-col">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-xl font-semibold" style="color: var(--text-primary);">Explorador de Mídia</h2>
-                    <button id="update-banners-btn" class="bg-transparent border border-brand text-brand px-4 py-2 rounded-md font-semibold flex items-center gap-2 hover:bg-brand hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--bg-secondary)] ring-brand disabled:opacity-50 disabled:cursor-not-allowed">
-                        <svg id="update-icon" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 110 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path></svg>
-                        <svg id="update-spinner" class="animate-spin h-5 w-5 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                        <span id="update-banners-btn-text">Atualizar Banners</span>
-                    </button>
-                </div>
+  <aside id="host-settings" class="host-settings">
+    <section class="host-card">
+      <h2 class="host-card-title">Link de Convite</h2>
+      <div class="host-inline-row">
+        <input type="text" id="invite-link-field" class="ui-input" value="Carregando..." readonly>
+        <button id="copy-link-btn" type="button" class="ui-btn ui-btn--primary">Copiar</button>
+      </div>
+    </section>
 
-                <!-- Breadcrumbs -->
-                <nav class="mb-4 text-sm" style="color: var(--text-secondary);">
-                    <ol id="breadcrumbs-container" class="flex items-center flex-wrap gap-1"></ol>
-                </nav>
+    <section class="host-card">
+      <h2 class="host-card-title">Conexão WebRTC</h2>
+      <p class="host-card-description">Escolha como novas conexões usarão o servidor TURN.</p>
+      <label class="host-field-label" for="rtc-mode-select">Modo de conexão</label>
+      <select id="rtc-mode-select" class="ui-input">
+        <option value="off">Sem TURN</option>
+        <option value="auto">Automático (fallback)</option>
+        <option value="relay">Forçar TURN</option>
+      </select>
+      <p id="rtc-mode-description" class="host-card-note"></p>
+      <p id="rtc-mode-status" class="host-card-note" role="status"></p>
+    </section>
 
-                <!-- Grid de Mídia -->
-                <div class="flex-grow min-h-[300px] flex flex-col gap-8">
-                    <div>
-                        <h3 class="text-lg font-semibold mb-3 border-b border-b-[var(--border-color)] pb-2" style="color: var(--text-primary);">Vídeos</h3>
-                        <div id="video-grid" class="media-grid-layout">
-                            <!-- Vídeos serão inseridos aqui -->
-                        </div>
-                    </div>
-                    <div>
-                        <h3 class="text-lg font-semibold mb-3 border-b border-b-[var(--border-color)] pb-2" style="color: var(--text-primary);">Pastas</h3>
-                        <div id="folder-grid" class="media-grid-layout">
-                            <!-- Pastas serão inseridas aqui -->
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </main>
+    <section class="host-card">
+      <h2 class="host-card-title">Origem de Mídia</h2>
+      <p class="host-card-description">Escolha o catálogo que deseja navegar.</p>
+      <label class="host-field-label" for="source-select">Catálogo ativo</label>
+      <select id="source-select" data-testid="source-select" class="ui-input"></select>
+      <ul id="source-diagnostics" class="host-diagnostics"></ul>
+    </section>
+
+    <section class="host-card">
+      <h2 class="host-card-title">Acesso administrativo</h2>
+      <label class="host-check-row">
+        <input id="remote-host-admin-toggle" data-testid="remote-admin-toggle" type="checkbox">
+        <span>Permitir administração remota sem autenticação</span>
+      </label>
+      <p id="remote-host-admin-status" class="host-card-note" role="status"></p>
+    </section>
+
+    <button id="source-tools-button" data-testid="source-tools-button" type="button" class="host-tools-trigger" hidden>
+      Ferramentas da origem <span aria-hidden="true">&rsaquo;</span>
+    </button>
+  </aside>
+
+  <section id="host-explorer" class="host-explorer">
+    <div class="host-explorer-head">
+      <div>
+        <p class="host-explorer-eyebrow">Catálogo</p>
+        <h2 class="host-explorer-title">Explorador de Mídia</h2>
+      </div>
+      <span class="host-explorer-hint">Selecione o conteúdo para todos</span>
     </div>
 
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-    <script src="host.js"></script>
-</body>
-</html>
+    <form id="catalog-search" data-testid="catalog-search" class="host-search">
+      <input id="catalog-search-input" class="ui-input" type="search" placeholder="Buscar no catálogo">
+      <button class="ui-btn ui-btn--primary" type="submit">Buscar</button>
+    </form>
+
+    <div class="host-explorer-body">
+      <nav id="catalog-views" class="catalog-views" aria-label="Views do catálogo"></nav>
+      <div class="catalog-content">
+        <nav id="breadcrumbs-nav" class="catalog-breadcrumbs" hidden><ol id="breadcrumbs-container"></ol></nav>
+        <div id="catalog-loading" class="catalog-loading" hidden>Carregando...</div>
+        <div id="catalog-scroll" data-testid="catalog-scroll" class="catalog-scroll">
+          <div id="video-section" class="catalog-section">
+            <h3 id="video-section-title" data-testid="video-section-title" class="catalog-section-title">Vídeos</h3>
+            <div id="video-grid" data-testid="video-grid" class="media-grid-layout"></div>
+          </div>
+          <div id="folder-section" class="catalog-section">
+            <h3 id="folder-section-title" data-testid="folder-section-title" class="catalog-section-title">Pastas</h3>
+            <div id="folder-grid" data-testid="folder-grid" class="media-grid-layout"></div>
+          </div>
+          <div id="catalog-pagination" class="catalog-pagination" hidden></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+</div>
+
+<!-- Ferramentas: escopo global da origem (armazenamento, inventário, limpeza,
+     preferências, atividade).  Nada aqui opera uma mídia específica. -->
+<div id="tools-modal" data-testid="tools-modal" class="host-modal" role="dialog" aria-modal="true" aria-labelledby="tools-modal-title" hidden>
+  <div class="host-modal-panel">
+    <header class="host-modal-head">
+      <div>
+        <h2 id="tools-modal-title" class="host-modal-title">Ferramentas</h2>
+        <p id="tools-modal-context" class="host-modal-subtitle"></p>
+      </div>
+      <button type="button" data-close-modal="tools-modal" class="host-modal-close" aria-label="Fechar">&times;</button>
+    </header>
+    <div id="tools-modal-body" data-testid="tools-modal-body" class="host-modal-body"></div>
+  </div>
+</div>
+
+<!-- Inspetor: escopo da entidade aberta (favorito, estado, baixar/exportar). -->
+<div id="inspector-modal" data-testid="inspector-modal" class="host-modal" role="dialog" aria-modal="true" aria-labelledby="inspector-modal-title" hidden>
+  <div class="host-modal-panel">
+    <header class="host-modal-head">
+      <div>
+        <h2 id="inspector-modal-title" class="host-modal-title">Inspetor</h2>
+        <p id="inspector-modal-context" class="host-modal-subtitle"></p>
+      </div>
+      <button type="button" data-close-modal="inspector-modal" class="host-modal-close" aria-label="Fechar">&times;</button>
+    </header>
+    <div class="host-modal-body">
+      <section class="host-inspector-favorite">
+        <label class="host-check-row">
+          <input id="inspector-favorite" data-testid="inspector-favorite" type="checkbox">
+          <span>Favorito</span>
+        </label>
+      </section>
+      <div id="inspector-plugin-root" data-testid="inspector-plugin-root" class="plugin-stack"></div>
+    </div>
+    <footer id="inspector-modal-footer" class="host-modal-footer" hidden></footer>
+  </div>
+</div>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<!-- Modulo: host.js importa modules/ui.js, o mesmo que os plugins usam. -->
+<script type="module" src="host.js?v=10"></script>
+</body></html>
