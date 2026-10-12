@@ -1,200 +1,47 @@
-import { isVideoFromYoutube } from './utils.js';
 import { showNotification } from './notifications.js';
 import { isScreenShareVideo } from './screen-share.js';
 
-// Shared mutable state — imported as a live reference by host-ui.js
-export const syncState = {
-    isSyncing: false,
-    syncInterval: null,
-    syncRequestTime: 0,
-    currentVideo: null
-};
-
-export async function loadMediaTracks(videoPath) {
-    try {
-        const response = await fetch(`/api/get_subtitles/${videoPath}`);
-        if (!response.ok) return { subtitles: [], dubs: [] };
-        const data = await response.json();
-        return { subtitles: data.subtitles || [], dubs: data.dubs || [] };
-    } catch (error) {
-        console.error("Erro ao buscar faixas de mídia:", error);
-        return { subtitles: [], dubs: [] };
-    }
+export const syncState = { isSyncing: false, syncInterval: null, syncRequestTime: 0, currentVideo: null, loadToken: 0 };
+export async function loadMediaTracks(selection) {
+    const response = await fetch('/api/playback/select', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(selection) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || 'Não foi possível carregar a mídia.');
+    return data;
 }
-
-export function setupDubControls(dubs, dubSelector, audioControlsContainer) {
-    dubSelector.innerHTML = '';
-    if (dubs && dubs.length > 1) {
-        dubs.forEach(dub => {
-            const option = document.createElement('option');
-            option.value = dub.lang;
-            option.textContent = dub.label;
-            option.dataset.src = dub.src || '';
-            dubSelector.appendChild(option);
-        });
-        audioControlsContainer.style.display = 'flex';
-    } else {
-        audioControlsContainer.style.display = 'none';
-    }
+export function setupDubControls() {}
+export function setupDubListeners() {}
+function clearMedia(player) { player.muted = false; player.unload(); }
+async function applySelection(selection, player) {
+    const token = ++syncState.loadToken; player.muted = false; await player.unload();
+    const descriptor = await loadMediaTracks(selection); if (token !== syncState.loadToken) return false;
+    await player.load(descriptor.manifest.url); return token === syncState.loadToken;
 }
-
-export function setupDubListeners(dubSelector, dubVolume, dubDelayInput, dubPlayer, player) {
-    dubSelector.addEventListener('change', (e) => {
-        const selectedOption = e.target.options[e.target.selectedIndex];
-        const src = selectedOption.dataset.src;
-        if (src) {
-            dubPlayer.src = src;
-            dubPlayer.currentTime = player.currentTime;
-            if (!player.paused) dubPlayer.play();
-            player.muted = true;
-        } else {
-            dubPlayer.src = '';
-            player.muted = false;
-        }
-    });
-
-    dubVolume.addEventListener('input', (e) => {
-        dubPlayer.volume = e.target.value;
-    });
-
-    dubDelayInput.addEventListener('change', (e) => {
-        dubPlayer.currentTime = player.currentTime + parseFloat(e.target.value);
-    });
+export async function handleSyncState(state, player) {
+    if (!state.video) return; syncState.isSyncing = true; syncState.currentVideo = state.video;
+    try { if (await applySelection(state.video, player)) { player.currentTime = state.time; if (state.paused) player.pause(); else await player.play(); } }
+    catch (error) { console.error(error); showNotification(error.message, 'error'); }
+    finally { setTimeout(() => { syncState.isSyncing = false; }, 500); }
 }
-
-export function handleSyncState(state, player, dubSelector, audioControlsContainer) {
-    if (!state.video) return;
-
+export function handleSyncEvent(data, player, _dubPlayer, _dubDelay, isHostRef, _selector, _container, getScreenStream, stopScreenShare) {
+    if (isHostRef.value && ['play','pause','seek'].includes(data.type)) return;
+    if (isScreenShareVideo(syncState.currentVideo) && ['play','pause','seek'].includes(data.type)) return;
     syncState.isSyncing = true;
-    syncState.currentVideo = state.video;
-
-    if (isScreenShareVideo(state.video)) {
-        player.pause();
-        player.source = { type: 'video', sources: [] };
-        setupDubControls([], dubSelector, audioControlsContainer);
-        setTimeout(() => { syncState.isSyncing = false; }, 500);
-        return;
-    }
-
-    if (state.video.startsWith('http')) {
-        player.source = {
-            type: 'video',
-            sources: [{
-                src: state.video,
-                provider: isVideoFromYoutube(state.video) ? 'youtube' : 'html5'
-            }]
-        };
-    } else {
-        loadMediaTracks(state.video).then(({ subtitles, dubs }) => {
-            player.source = {
-                type: 'video',
-                sources: [{ src: `/video/${state.video}`, provider: 'html5' }],
-                tracks: subtitles
-            };
-            setupDubControls(dubs, dubSelector, audioControlsContainer);
-        });
-    }
-
-    player.currentTime = state.time;
-    if (state.paused) {
-        player.pause();
-    } else {
-        player.play().catch(() => console.warn('Autoplay bloqueado pelo navegador.'));
-    }
-    setTimeout(() => { syncState.isSyncing = false; }, 1000);
-}
-
-export function handleSyncEvent(data, player, dubPlayer, dubDelayInput, isHostRef, dubSelector, audioControlsContainer, getScreenStream, stopScreenShare) {
-    if (isHostRef.value && ['play', 'pause', 'seek'].includes(data.type)) return;
-    if (isScreenShareVideo(syncState.currentVideo) && ['play', 'pause', 'seek'].includes(data.type)) return;
-
-    syncState.isSyncing = true;
-
-    try {
-        switch (data.type) {
-            case 'set_video':
-                syncState.currentVideo = data.video;
-
-                if (isHostRef.value && getScreenStream()) {
-                    stopScreenShare({ emit: false, sessionId: data.session_id });
-                }
-
-                if (player.media.srcObject) {
-                    player.media.srcObject.getTracks().forEach(track => track.stop());
-                    player.media.srcObject = null;
-                }
-
-                if (isScreenShareVideo(data.video)) {
-                    if (syncState.syncInterval) {
-                        clearInterval(syncState.syncInterval);
-                        syncState.syncInterval = null;
-                    }
-                    dubPlayer.pause();
-                    dubPlayer.src = '';
-                    setupDubControls([], dubSelector, audioControlsContainer);
-                    showNotification("O host iniciou uma transmissão de tela.", "info");
-                    player.pause();
-                    player.source = { type: 'video', sources: [] };
-                    break;
-                }
-
-                if (data.video.startsWith('http')) {
-                    player.source = {
-                        type: 'video',
-                        sources: [{ src: data.video, provider: isVideoFromYoutube(data.video) ? 'youtube' : 'html5' }]
-                    };
-                } else {
-                    loadMediaTracks(data.video).then(({ subtitles, dubs }) => {
-                        player.source = {
-                            type: 'video',
-                            sources: [{ src: `/video/${data.video}`, provider: 'html5' }],
-                            tracks: subtitles
-                        };
-                        setupDubControls(dubs, dubSelector, audioControlsContainer);
-                    });
-                }
-
-                player.pause();
-                player.currentTime = 0;
-                break;
-
-            case 'play':
-                if (!player.muted) dubPlayer.pause(); else dubPlayer.play();
-                player.play();
-                break;
-
-            case 'pause':
-                dubPlayer.pause();
-                player.pause();
-                break;
-
-            case 'seek':
-                if (Math.abs(player.currentTime - data.time) > 1.5) {
-                    player.currentTime = data.time;
-                }
-                dubPlayer.currentTime = player.currentTime + parseFloat(dubDelayInput.value);
-                break;
-        }
-    } catch (e) {
-        console.error("Erro ao sincronizar player:", e);
-    }
-
+    if (data.type === 'set_video') {
+        syncState.currentVideo = data.video;
+        if (isHostRef.value && getScreenStream()) stopScreenShare({ emit: false, sessionId: data.session_id });
+        if (player.media.srcObject) { player.media.srcObject.getTracks().forEach(track => track.stop()); player.media.srcObject = null; }
+        if (isScreenShareVideo(data.video)) { syncState.loadToken++; clearMedia(player); player.pause(); showNotification('O host iniciou uma transmissão de tela.', 'info'); }
+        else applySelection(data.video, player).then(ok => { if (ok) { player.pause(); player.currentTime = Number(data.time || 0); } }).catch(error => showNotification(error.message, 'error'));
+    } else if (data.type === 'play') player.play().catch(() => {});
+    else if (data.type === 'pause') player.pause();
+    else if (data.type === 'seek' && Math.abs(player.currentTime - data.time) > 1.5) player.currentTime = data.time;
     setTimeout(() => { syncState.isSyncing = false; }, 500);
 }
-
 export function handleForceSync(data, player, isHostRef, statusIndicator) {
     if (isHostRef.value || syncState.isSyncing || player.media.srcObject || isScreenShareVideo(syncState.currentVideo)) return;
-
-    const ping = Date.now() - syncState.syncRequestTime;
-    const correctedTime = data.time + (ping / 2 / 1000);
-
-    statusIndicator.innerHTML = `Ping: <span class="ping-value">${ping} ms</span>`;
-
-    if (Math.abs(player.currentTime - correctedTime) > 2) {
-        syncState.isSyncing = true;
-        player.currentTime = correctedTime;
-        if (data.paused && !player.paused) player.pause();
-        else if (!data.paused && player.paused) player.play();
-        setTimeout(() => { syncState.isSyncing = false; }, 500);
-    }
+    const ping = Date.now() - syncState.syncRequestTime; const correctedTime = data.time + ping / 2000; statusIndicator.innerHTML = `Ping: <span class="ping-value">${ping} ms</span>`;
+    const drift = player.currentTime - correctedTime;
+    if (Math.abs(drift) > 2) player.currentTime = correctedTime;
+    else if (Math.abs(drift) > 0.25) { player.playbackRate = Math.max(0.9, Math.min(1.1, 1 - drift * 0.08)); setTimeout(() => { player.playbackRate = 1; }, 3000); }
+    if (data.paused) player.pause(); else player.play().catch(() => {});
 }

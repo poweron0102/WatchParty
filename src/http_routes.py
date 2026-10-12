@@ -1,80 +1,157 @@
-import os
-import mimetypes
-import fastapi
+import asyncio
 import hashlib
-import cv2
-import random
-import requests
-from bs4 import BeautifulSoup
-#from imdb import Cinemagoer
+import ipaddress
+import os
+import re
+import secrets
+import sys
+from dataclasses import asdict
+
+import fastapi
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 from starlette.requests import Request
-from config import FILES_DIR, CACHE_DIR, VIDEO_DIR, PORT, ICE_SERVERS
+from starlette.responses import FileResponse, StreamingResponse
+from typing import Literal
+
+from config import (CACHE_DIR, FILES_DIR, ICE_SERVERS, MEDIA_SOURCES, PLAYBACK_CONFIG, PORT,
+                    TURN_CONFIGURED, TURN_CREDENTIAL_TTL, TURN_HOST, TURN_PORT, TURN_SECRET,
+                    persist_remote_host_admin)
+from media_sources import (ByteRangeRequest, CollectionNotFound, InvalidByteRange,
+                           MediaItemNotFound, ResourceNotFound, SourceNotFound,
+                           SourceReadError, SourceUnavailable)
+from rtc_config import build_rtc_config, managed_turn_server
 from server_setup import app
+from state import host_store, server_state
 from utils import get_public_ip
+from playback import PlaybackModule, PlaybackSelection, ResourceRequest
+from playback.models import (InvalidPlaybackResource, MaterializationTimeout, PlaybackExpired,
+                             PlaybackNotFound, PlaybackPaused)
 
-def _get_high_res_imdb_url(url: str) -> str:
-    """
-    Converte uma URL de thumbnail do IMDb para sua versão de alta resolução.
-    Ex: https://.../MV5BM...@@._V1_..._.jpg -> https://.../MV5BM...@@.jpg
-    """
-    if url and "@@" in url:
-        base_url = url.split("@@")[0]
-        return base_url + "@@._V1_.jpg"
-    return url
+PLAYBACK = PlaybackModule(MEDIA_SOURCES.playback_origins(),
+                          wait_timeout=PLAYBACK_CONFIG["segment_wait_timeout_seconds"])
 
-def _fetch_imdb_poster_url(title: str) -> str | None:
-    """
-    Busca um título no IMDb, faz scraping da página do resultado principal
-    e retorna a URL do pôster em alta resolução.
-    """
-    print(f"Buscando imagem no IMDb para '{title}'...")
-    #ia = Cinemagoer()
-    ia = None
-    movies = ia.search_movie(title)
 
-    if not movies:
-        print(f"Nenhum resultado encontrado no IMDb para '{title}'.")
+class RtcModeUpdate(BaseModel):
+    mode: Literal["off", "auto", "relay"]
+
+
+def _resource_url(source_id: str, resource_id: str, revision: str | None = None) -> str:
+    from urllib.parse import urlencode
+    values = {"source_id": source_id, "resource_id": resource_id}
+    if revision:
+        values["v"] = revision
+    return "/media/resource?" + urlencode(values)
+
+
+def _serialize_resource(source_id, resource):
+    if resource is None:
         return None
-
-    first_result_id = movies[0].movieID
-    movie_page_url = f"https://www.imdb.com/title/tt{first_result_id}/"
-
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-    response = requests.get(movie_page_url, headers=headers)
-    response.raise_for_status()
-
-    soup = BeautifulSoup(response.text, 'html.parser')
-    image_tag = soup.select_one('div[data-testid="hero-media__poster"] img')
-    if image_tag:
-        # Prioriza o srcset para obter a melhor resolução
-        if image_tag.get('srcset'):
-            srcset = image_tag['srcset']
-            # url1 1000w, url2 1500w, ...
-            sources = [s.strip() for s in srcset.split(',')]
-
-            valid_sources = []
-            link: str = ""
-            size: int = 0
-
-            for name in sources:
-                if name.startswith("https://"):
-                    link = name
-                    continue
-                elif name.endswith("w"):
-                    size = int(name[name.find(" "):-1])
-                    valid_sources.append((link, size))
-
-            best_source_url = max(valid_sources, key=lambda item: item[1])[0]
-            return _get_high_res_imdb_url(best_source_url)
-
-        if image_tag.get('src'):
-            return _get_high_res_imdb_url(image_tag['src'])
-    return None
+    data = asdict(resource)
+    data["url"] = _resource_url(source_id, resource.id, resource.revision)
+    return data
 
 
-# 1. Servir páginas principais
+def _entity_kind(item):
+    if getattr(item, "entity_kind", None):
+        return item.entity_kind
+    if getattr(item, "id", "").startswith(("series:", "season:", "episode:", "movie:")):
+        return item.id.split(":", 1)[0]
+    return "video" if getattr(item, "entry_type", None) == "playable" else "collection"
+
+
+def _serialize_entry(source_id, item):
+    data = asdict(item)
+    for field in ("image", "poster", "thumbnail"):
+        data[field] = _serialize_resource(source_id, getattr(item, field))
+    data["entity_kind"] = _entity_kind(item)
+    data["source_id"] = source_id
+    data["favorited"] = host_store.is_favorite(source_id, item.id, data["entity_kind"])
+    return data
+
+
+def _snapshot_entry(source_id, item):
+    return {field: _serialize_resource(source_id, getattr(item, field))
+            for field in ("image", "poster", "thumbnail")}
+
+
+def _local_entry(source_id, row, *, favorite=False, history=None):
+    snapshot = row.get("snapshot") or {}
+    kind = row.get("entity_kind") or "video"
+    is_collection = kind in {"series", "season", "collection", "group"}
+    value = {"id": row["media_id"], "title": row["title"],
+             "entry_type": "collection" if is_collection else "playable",
+             "media_kind": None if is_collection else "video", "entity_kind": kind, "source_id": source_id,
+             "image": snapshot.get("image"), "poster": snapshot.get("poster"),
+             "thumbnail": snapshot.get("thumbnail"), "favorited": favorite}
+    if history is not None:
+        value["history"] = {key: history[key] for key in ("position", "duration", "completed", "last_played_at")}
+    return value
+
+
+def _media_error(exc: Exception):
+    if isinstance(exc, SourceNotFound):
+        return fastapi.HTTPException(404, "Origem não encontrada.")
+    if isinstance(exc, (CollectionNotFound, MediaItemNotFound, ResourceNotFound)):
+        return fastapi.HTTPException(404, "Conteúdo não encontrado.")
+    if isinstance(exc, InvalidByteRange):
+        return fastapi.HTTPException(416, "Intervalo de bytes inválido.")
+    if isinstance(exc, (SourceUnavailable, SourceReadError)):
+        return fastapi.HTTPException(503, "Origem temporariamente indisponível.")
+    message = re.sub(r"https?://\S+", "<url>", str(exc) or type(exc).__name__)
+    print(f"Falha ao acessar origem: {type(exc).__name__}: {message[:240]}", file=sys.stderr)
+    return fastapi.HTTPException(500, "Falha ao acessar a origem.")
+
+
+def _parse_range(value: str | None) -> ByteRangeRequest | None:
+    if value is None:
+        return None
+    if not value.startswith("bytes=") or "," in value:
+        raise InvalidByteRange("intervalo inválido")
+    spec = value[6:].strip()
+    if "-" not in spec:
+        raise InvalidByteRange("intervalo inválido")
+    start_text, end_text = spec.split("-", 1)
+    try:
+        if not start_text:
+            return ByteRangeRequest(suffix_length=int(end_text))
+        return ByteRangeRequest(start=int(start_text), end=int(end_text) if end_text else None)
+    except (TypeError, ValueError) as exc:
+        raise InvalidByteRange("intervalo inválido") from exc
+
+
+def _is_loopback(request: Request) -> bool:
+    try:
+        return bool(request.client and ipaddress.ip_address(request.client.host).is_loopback)
+    except ValueError:
+        return False
+
+
+def _host_is_loopback(hostname: str | None) -> bool:
+    try:
+        return hostname == "localhost" or ipaddress.ip_address(hostname or "").is_loopback
+    except ValueError:
+        return False
+
+
+def _require_host_access(request: Request) -> None:
+    if not server_state["allow_remote_host_admin"] and not (
+        _is_loopback(request) and _host_is_loopback(request.url.hostname)
+    ):
+        raise fastapi.HTTPException(403, "Administração do host restrita ao localhost.")
+
+
+def _require_local_toggle(request: Request) -> None:
+    if not _is_loopback(request) or not _host_is_loopback(request.url.hostname):
+        raise fastapi.HTTPException(403, "Esta configuração só pode ser alterada pelo localhost.")
+    origin = request.headers.get("origin")
+    if origin:
+        from urllib.parse import urlparse
+        parsed = urlparse(origin)
+        if not _host_is_loopback(parsed.hostname):
+            raise fastapi.HTTPException(403, "Origem da requisição não permitida.")
+
+
 @app.get("/")
 async def get_index():
     return FileResponse(os.path.join(FILES_DIR, "index.html"))
@@ -86,216 +163,325 @@ async def get_party():
 
 
 @app.get("/host")
-async def get_host_page():
+@app.get("/host.html")
+async def get_host_page(request: Request):
+    _require_host_access(request)
     return FileResponse(os.path.join(FILES_DIR, "host.html"))
 
 
-# 3. Endpoint de Streaming de Vídeo
-@app.get("/video/{video_path:path}")
-async def stream_video(video_path: str, request: Request):
-    # Sanitize and validate path to prevent directory traversal
-    full_video_path = os.path.abspath(os.path.join(VIDEO_DIR, video_path))
-    if not full_video_path.startswith(os.path.abspath(VIDEO_DIR)):
-        return JSONResponse(status_code=403, content={"message": "Acesso negado"})
-
-    if not os.path.exists(full_video_path):
-        return JSONResponse(status_code=404, content={"message": "Video não encontrado"})
-
-    media_type, _ = mimetypes.guess_type(full_video_path)
-    return FileResponse(
-        full_video_path,
-        media_type=media_type or "video/mp4",
-        headers={"Accept-Ranges": "bytes"}
-    )
+@app.get("/api/sources")
+async def list_sources():
+    return {"sources": [asdict(summary) for summary in MEDIA_SOURCES.summaries],
+            "diagnostics": [asdict(item) for item in MEDIA_SOURCES.diagnostics]}
 
 
-# 4. Endpoints de API
+@app.get("/api/host/remote-access")
+async def get_remote_host_access(request: Request):
+    _require_host_access(request)
+    return {"enabled": bool(server_state["allow_remote_host_admin"]), "canChange": _is_loopback(request)}
+
+
+@app.put("/api/host/remote-access")
+async def set_remote_host_access(request: Request, payload: dict):
+    _require_local_toggle(request)
+    enabled = payload.get("enabled")
+    if not isinstance(enabled, bool):
+        raise fastapi.HTTPException(422, "enabled deve ser booleano.")
+    try:
+        persist_remote_host_admin(enabled)
+    except RuntimeError as exc:
+        raise fastapi.HTTPException(500, str(exc)) from exc
+    server_state["allow_remote_host_admin"] = enabled
+    return {"enabled": enabled, "canChange": True}
+
+
+@app.get("/host/{source_id}/module.js")
+async def get_source_host_module(request: Request, source_id: str):
+    _require_host_access(request)
+    try:
+        module = MEDIA_SOURCES.host_module(source_id)
+    except Exception as exc:
+        raise _media_error(exc) from exc
+    return FileResponse(module, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+
+@app.api_route("/host/{source_id}/{action:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+async def source_host_action(request: Request, source_id: str, action: str):
+    _require_host_access(request)
+    try:
+        source = MEDIA_SOURCES.get(source_id)
+    except Exception as exc:
+        raise _media_error(exc) from exc
+    handler = getattr(source, "handle_host_action", None)
+    if handler is None:
+        raise fastapi.HTTPException(404, "Ação administrativa não encontrada.")
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > 64 * 1024 * 1024:
+                raise fastapi.HTTPException(413, "Payload administrativo excede 64 MiB.")
+        except ValueError:
+            raise fastapi.HTTPException(400, "Content-Length inválido.")
+    try:
+        result = await handler(action.strip("/"), request)
+    except fastapi.HTTPException:
+        raise
+    except KeyError as exc:
+        raise fastapi.HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        print(f"Falha na ação {source_id}/{action}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        raise fastapi.HTTPException(500, "Ação administrativa falhou.") from exc
+    if result is None:
+        raise fastapi.HTTPException(404, "Ação administrativa não encontrada.")
+    return result
+
+
+@app.get("/api/catalog")
+async def browse_catalog(source_id: str, parent_id: str | None = None, cursor: str | None = None,
+                         view: str | None = None):
+    if view in {"history", "favorites"} and parent_id is None:
+        rows = host_store.history(source_id) if view == "history" else host_store.favorites(source_id)
+        items = [_local_entry(source_id, row, favorite=view == "favorites",
+                              history=row if view == "history" else None) for row in rows]
+        return {"items": items, "next_cursor": None, "view": view}
+    try:
+        source = MEDIA_SOURCES.get(source_id)
+        browse_view = getattr(source, "browse_view", None)
+        if view == "cache-local" and browse_view is None:
+            raise CollectionNotFound("cache local indisponível para esta origem")
+        page = await browse_view(view, parent_id, cursor) if view and browse_view else await source.browse(parent_id, cursor)
+    except Exception as exc:
+        raise _media_error(exc) from exc
+    items = [_serialize_entry(source_id, item) for item in page.items]
+    if view == "cache-local":
+        inventory = {row["media_id"]: row for row in await asyncio.to_thread(getattr(source, "cache").inventory)}
+        for item in items:
+            cached = inventory.get(item["id"])
+            if cached:
+                item["cache"] = {key: cached[key] for key in ("state", "coverage", "cached_bytes", "cached_count")}
+    return {"items": items, "next_cursor": page.next_cursor, "view": view or "catalog"}
+
+
+@app.get("/api/media")
+async def get_media(source_id: str, media_id: str):
+    try:
+        item = await MEDIA_SOURCES.get(source_id).get_item(media_id)
+    except Exception as exc:
+        raise _media_error(exc) from exc
+    data = asdict(item)
+    data["video"] = _serialize_resource(source_id, item.video)
+    for field in ("image", "poster", "thumbnail"):
+        data[field] = _serialize_resource(source_id, getattr(item, field))
+    for group in ("audio_tracks", "subtitles"):
+        for track in data[group]:
+            track["url"] = _resource_url(source_id, track["resource_id"])
+    data["source_id"] = source_id
+    data["entity_kind"] = media_id.split(":", 1)[0] if ":" in media_id else "video"
+    data["favorited"] = host_store.is_favorite(source_id, media_id, data["entity_kind"])
+    return data
+
+
+@app.get("/api/history")
+async def get_history(source_id: str | None = None):
+    return {"items": host_store.history(source_id)}
+
+
+@app.post("/api/history")
+async def record_history_play(request: fastapi.Request, payload: dict):
+    _require_host_access(request)
+    required = ("source_id", "media_id", "entity_kind", "title")
+    if any(not isinstance(payload.get(key), str) or not payload[key] for key in required):
+        raise fastapi.HTTPException(422, "identidade de histórico inválida.")
+    try:
+        position = float(payload.get("position", 0))
+        duration = float(payload["duration"]) if payload.get("duration") is not None else None
+    except (TypeError, ValueError):
+        raise fastapi.HTTPException(422, "posição ou duração inválida.")
+    host_store.record_play(payload["source_id"], payload["media_id"], payload["entity_kind"],
+                           title=payload["title"], snapshot=payload.get("snapshot"),
+                           position=position, duration=duration)
+    return {"recorded": True}
+
+
+@app.get("/api/history/{source_id}/{media_id:path}/resume")
+async def get_history_resume(source_id: str, media_id: str, entity_kind: str | None = None):
+    return {"resume": host_store.resume(source_id, media_id, entity_kind)}
+
+
+@app.post("/api/history/checkpoint")
+async def save_history_checkpoint(request: fastapi.Request, payload: dict):
+    _require_host_access(request)
+    required = ("source_id", "media_id", "entity_kind", "position")
+    if any(not isinstance(payload.get(key), str) or not payload[key] for key in required[:3]):
+        raise fastapi.HTTPException(422, "identidade de mídia inválida.")
+    try:
+        position = float(payload["position"])
+        duration = float(payload["duration"]) if payload.get("duration") is not None else None
+    except (TypeError, ValueError):
+        raise fastapi.HTTPException(422, "posição ou duração inválida.")
+    host_store.checkpoint(payload["source_id"], payload["media_id"], payload["entity_kind"],
+                          position=position, duration=duration,
+                          completed=payload.get("completed"))
+    return {"saved": True}
+
+
+@app.delete("/api/history/{source_id}/{media_id:path}")
+async def delete_history(request: fastapi.Request, source_id: str, media_id: str, entity_kind: str | None = None):
+    _require_host_access(request)
+    host_store.remove_history(source_id, media_id, entity_kind)
+    return {"removed": True}
+
+
+@app.delete("/api/history")
+async def clear_history(request: fastapi.Request, source_id: str | None = None):
+    _require_host_access(request)
+    host_store.clear_history(source_id)
+    return {"cleared": True}
+
+
+@app.get("/api/favorites")
+async def get_favorites(source_id: str | None = None):
+    return {"items": host_store.favorites(source_id)}
+
+
+@app.api_route("/api/favorites", methods=["POST", "PUT"])
+async def set_favorite(request: fastapi.Request, payload: dict):
+    _require_host_access(request)
+    required = ("source_id", "media_id", "entity_kind", "title")
+    if any(not isinstance(payload.get(key), str) or not payload[key] for key in required):
+        raise fastapi.HTTPException(422, "snapshot de favorito inválido.")
+    value = host_store.toggle_favorite(payload["source_id"], payload["media_id"], payload["entity_kind"],
+                                       title=payload["title"], snapshot=payload.get("snapshot"),
+                                       favorite=payload.get("favorite"))
+    return {"favorited": value}
+
+
+@app.delete("/api/favorites/{source_id}/{media_id:path}")
+async def delete_favorite(request: fastapi.Request, source_id: str, media_id: str, entity_kind: str | None = None):
+    _require_host_access(request)
+    host_store.toggle_favorite(source_id, media_id, entity_kind or "video", title="", favorite=False)
+    return {"favorited": False}
+
+
+@app.get("/api/search")
+async def search_catalog(source_id: str, q: str, cursor: str | None = None):
+    try:
+        page = await MEDIA_SOURCES.get(source_id).search(q, cursor)
+    except Exception as exc:
+        raise _media_error(exc) from exc
+    items = []
+    for item in page.items:
+        items.append(_serialize_entry(source_id, item))
+    return {"items": items, "next_cursor": page.next_cursor}
+
+
+@app.post("/api/playback/select")
+async def select_playback(selection: dict):
+    try:
+        descriptor = await PLAYBACK.select(PlaybackSelection(selection["source_id"], selection["media_id"]))
+    except (KeyError, PlaybackNotFound):
+        raise fastapi.HTTPException(404, "Playback indisponível.")
+    except Exception as exc:
+        print(f"Falha ao selecionar playback: {type(exc).__name__}: {exc}", file=sys.stderr)
+        raise _media_error(exc) from exc
+    data = asdict(descriptor)
+    data["manifest"]["url"] = f"/playback/{descriptor.playback_id}/asset/manifest.mpd"
+    return data
+
+
+@app.put("/api/playback/{playback_id}/paused")
+async def pause_playback(playback_id: str, payload: dict):
+    try: await PLAYBACK.set_download_paused(playback_id, bool(payload.get("paused")))
+    except PlaybackExpired: raise fastapi.HTTPException(410, "Apresentação substituída.")
+    except PlaybackNotFound: raise fastapi.HTTPException(404, "Playback não encontrado.")
+    return {"paused": bool(payload.get("paused"))}
+
+
+@app.api_route("/playback/{playback_id}/asset/{resource_id}", methods=["GET", "HEAD"])
+async def playback_asset(request: Request, playback_id: str, resource_id: str):
+    try: opened = await PLAYBACK.open(playback_id, resource_id, ResourceRequest(request.method))
+    except PlaybackExpired: raise fastapi.HTTPException(410, "Apresentação substituída.")
+    except (PlaybackNotFound, InvalidPlaybackResource): raise fastapi.HTTPException(404, "Recurso não encontrado.")
+    except PlaybackPaused: raise fastapi.HTTPException(409, "Materialização pausada.", headers={"X-WatchParty-State": "download-paused"})
+    except MaterializationTimeout: raise fastapi.HTTPException(503, "Recurso ainda não está pronto.", headers={"Retry-After": "1"})
+    except (SourceUnavailable, SourceReadError) as exc:
+        raise fastapi.HTTPException(503, "Origem temporariamente indisponível.",
+                                    headers={"Retry-After": str(getattr(exc, "retry_after", 1))}) from exc
+    headers = {"Content-Length": str(opened.content_length), "Cache-Control": "private, max-age=31536000, immutable"}
+    if resource_id == "manifest.mpd": headers["Cache-Control"] = "private, no-cache"
+    if request.method == "HEAD": return fastapi.Response(media_type=opened.content_type, headers=headers)
+    return StreamingResponse(opened.chunks, media_type=opened.content_type, headers=headers)
+
+
+@app.api_route("/media/resource", methods=["GET", "HEAD"])
+async def stream_resource(request: Request, source_id: str, resource_id: str, v: str | None = None):
+    source = None
+    try:
+        source = MEDIA_SOURCES.get(source_id)
+        requested_range = _parse_range(request.headers.get("range"))
+        opened = await source.open_resource(resource_id, requested_range)
+    except InvalidByteRange as exc:
+        headers = {"Accept-Ranges": "bytes"}
+        if source is not None:
+            try:
+                complete = await source.open_resource(resource_id)
+                headers["Content-Range"] = f"bytes */{complete.total_size}"
+            except Exception:
+                pass
+        return fastapi.Response(status_code=416, headers=headers)
+    except Exception as exc:
+        raise _media_error(exc) from exc
+    partial = requested_range is not None
+    headers = {"Accept-Ranges": "bytes", "Content-Length": str(opened.content_length)}
+    if v:
+        etag = hashlib.sha256(v.encode()).hexdigest()
+        headers.update({"Cache-Control": "private, max-age=31536000, immutable", "ETag": f'"{etag}"'})
+    if partial:
+        headers["Content-Range"] = f"bytes {opened.start}-{opened.end}/{opened.total_size}"
+    if request.method == "HEAD":
+        return fastapi.Response(status_code=206 if partial else 200, media_type=opened.content_type, headers=headers)
+    return StreamingResponse(opened.chunks, status_code=206 if partial else 200,
+                             media_type=opened.content_type, headers=headers)
+
 
 @app.get("/api/rtc_config")
 async def get_rtc_config():
-    return {"iceServers": ICE_SERVERS}
+    turn_server = managed_turn_server(TURN_HOST, TURN_PORT, TURN_SECRET,
+                                      secrets.token_urlsafe(12), TURN_CREDENTIAL_TTL)
+    return build_rtc_config(ICE_SERVERS, server_state["rtc_mode"], turn_server)
+
+
+@app.get("/api/rtc_mode")
+async def get_rtc_mode():
+    return {"mode": server_state["rtc_mode"], "turnConfigured": TURN_CONFIGURED}
+
+
+@app.put("/api/rtc_mode")
+async def update_rtc_mode(update: RtcModeUpdate):
+    if update.mode != "off" and not TURN_CONFIGURED:
+        raise fastapi.HTTPException(409, "O servidor TURN não está configurado.")
+    server_state["rtc_mode"] = update.mode
+    return {"mode": update.mode, "turnConfigured": TURN_CONFIGURED}
 
 
 @app.post("/api/upload_image")
 async def upload_image(file: fastapi.UploadFile):
     contents = await file.read()
-
     file_hash = hashlib.sha256(contents).hexdigest()
     _, ext = os.path.splitext(file.filename or "")
-
-    hashed_filename = f"{file_hash}{ext}"
-    dest_path = os.path.join(CACHE_DIR, hashed_filename)
-
+    dest_path = os.path.join(CACHE_DIR, f"{file_hash}{ext}")
     os.makedirs(CACHE_DIR, exist_ok=True)
-    
     if not os.path.exists(dest_path):
-        with open(dest_path, "wb") as buffer:
-            buffer.write(contents)
-        print(f"Imagem salva em {dest_path}")
-        
-    return {"url": f"/{CACHE_DIR}/{hashed_filename}"}
-
-
-@app.get("/api/get_videos")
-async def list_videos(path: str = ""):
-    # Sanitize and validate path
-    current_path = os.path.abspath(os.path.join(VIDEO_DIR, path))
-    if not current_path.startswith(os.path.abspath(VIDEO_DIR)) or not os.path.isdir(current_path):
-        return JSONResponse(status_code=404, content={"message": "Caminho não encontrado"})
-
-    try:
-        items = []
-        # Ignora arquivos/pastas que começam com '.'
-        dir_items = [item for item in os.listdir(current_path) if not item.startswith('.')]
-
-        for item_name in sorted(dir_items):
-            item_path = os.path.join(current_path, item_name)
-            relative_item_path = os.path.join(path, item_name)
-
-            if os.path.isdir(item_path):
-                items.append({"name": item_name, "type": "folder", "path": relative_item_path})
-            elif item_name.lower().endswith((".mp4", ".mkv", ".webm", ".avi")):
-                items.append({"name": item_name, "type": "video", "path": relative_item_path})
-
-        return {"items": items}
-    except FileNotFoundError:
-        return JSONResponse(status_code=500, content={"message": f"Diretório de vídeo não encontrado: {VIDEO_DIR}"})
-
-
-@app.get("/api/get_subtitles/{video_path:path}")
-async def get_subtitles(video_path: str):
-    """
-    Encontra os arquivos de legenda (.vtt) e dublagem para um determinado vídeo.
-    """
-    # Sanitize and validate path
-    full_video_path = os.path.abspath(os.path.join(VIDEO_DIR, video_path))
-    if not full_video_path.startswith(os.path.abspath(VIDEO_DIR)) or not os.path.isfile(full_video_path):
-        return JSONResponse(status_code=404, content={"message": "Vídeo não encontrado"})
-
-    video_dir = os.path.dirname(full_video_path)
-    video_base_name = os.path.splitext(os.path.basename(full_video_path))[0]
-    relative_video_dir = os.path.dirname(video_path)
-
-    # --- Legendas ---
-    subs_dir = os.path.join(video_dir, ".subs")
-    subtitles = []
-    if os.path.isdir(subs_dir):
-        for filename in os.listdir(subs_dir):
-            if filename.lower().endswith(".vtt") and filename.startswith(video_base_name):
-                parts = os.path.splitext(filename)[0].split('.')
-                lang_code = "pt"
-                if len(parts) > 2:
-                    lang_code = parts[-1] if len(parts[-1]) == 2 else parts[-2]
-
-                subtitle_src = os.path.join("/videos", relative_video_dir, ".subs", filename).replace("\\", "/")
-                subtitles.append({"lang": lang_code, "label": lang_code.upper(), "src": subtitle_src})
-
-    # --- Dublagens ---
-    dubs_dir = os.path.join(video_dir, ".dubs")
-    dubs = []
-    if os.path.isdir(dubs_dir):
-        for filename in os.listdir(dubs_dir):
-            if filename.lower().endswith((".mp3", ".aac", ".ogg")) and filename.startswith(video_base_name):
-                parts = os.path.splitext(filename)[0].split('.')
-                lang_code = "dub"
-                if len(parts) > 1:
-                    lang_code = parts[-1] if len(parts[-1]) == 2 else parts[-2]
-
-                dub_src = os.path.join("/videos", relative_video_dir, ".dubs", filename).replace("\\", "/")
-                dubs.append({
-                    "lang": lang_code,
-                    "label": lang_code.upper(),
-                    "src": dub_src
-                })
-
-    # Adiciona a opção de áudio original
-    dubs.insert(0, {
-        "lang": "original",
-        "label": "Original",
-        "src": None
-    })
-
-    print(f"Mídia encontrada para '{video_path}': {len(subtitles)} legendas, {len(dubs) -1} dublagens.")
-    return {"subtitles": subtitles, "dubs": dubs}
+        with open(dest_path, "wb") as stream:
+            stream.write(contents)
+    return {"url": f"/{CACHE_DIR}/{file_hash}{ext}"}
 
 
 @app.get("/api/get_ip")
 async def get_ip_address():
     ip = get_public_ip()
-    link = f"http://[{ip}]:{PORT}/" if ":" in ip else f"http://{ip}:{PORT}/"
-    return {"ip": ip, "link": link}
-
-
-@app.post("/api/update_banners")
-async def update_banners():
-    """
-    Percorre recursivamente o diretório de vídeos, buscando pôsteres para pastas (séries)
-    e gerando thumbnails para arquivos de vídeo.
-    Salva as imagens em uma subpasta '.previews'.
-    """
-    updated_banners = []
-
-    for root, dirs, files in os.walk(VIDEO_DIR):
-        # Ignora pastas .previews e outras pastas ocultas
-        dirs[:] = [d for d in dirs if not d.startswith('.')]
-
-        # 1. Processa pastas (para séries/temporadas)
-        # Apenas processa a pasta se ela não for a raiz de vídeos
-        if root != VIDEO_DIR:
-            dir_name = os.path.basename(root)
-            preview_dir = os.path.join(root, ".previews")
-            banner_path = os.path.join(preview_dir, "banner.png")
-
-            if not os.path.exists(banner_path):
-                os.makedirs(preview_dir, exist_ok=True)
-                image_url = _fetch_imdb_poster_url(dir_name)
-                if image_url:
-                    try:
-                        image_response = requests.get(image_url)
-                        image_response.raise_for_status()
-                        with open(banner_path, "wb") as f:
-                            f.write(image_response.content)
-                        updated_banners.append(dir_name)
-                    except Exception as e:
-                        print(f"Erro ao baixar o banner para {dir_name}: {e}")
-
-        # 2. Processa arquivos de vídeo
-        for filename in files:
-            if not filename.lower().endswith((".mp4", ".mkv", ".webm", ".avi")):
-                continue
-
-            base_name, _ = os.path.splitext(filename)
-            video_path = os.path.join(root, filename)
-            preview_dir = os.path.join(root, ".previews")
-            banner_path = os.path.join(preview_dir, f"{base_name}_banner.png")
-
-            if os.path.exists(banner_path):
-                continue
-
-            os.makedirs(preview_dir, exist_ok=True)
-            try:
-                print(f"Gerando thumbnail para o vídeo '{filename}'...")
-                cap = cv2.VideoCapture(video_path)
-                if not cap.isOpened():
-                    print(f"Erro ao abrir o vídeo {filename}")
-                    continue
-
-                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                # Captura um frame entre 10% e 70% do vídeo
-                random_frame_number = random.randint(int(total_frames * 0.1), int(total_frames * 0.7))
-                cap.set(cv2.CAP_PROP_POS_FRAMES, random_frame_number)
-
-                success, frame = cap.read()
-                if success:
-                    cv2.imwrite(banner_path, frame)
-                    updated_banners.append(base_name)
-                cap.release()
-            except Exception as e:
-                print(f"Erro ao gerar thumbnail para {base_name}: {e}")
-
-    return {"message": f"Banners atualizados para: {', '.join(updated_banners)}"}
+    return {"ip": ip, "link": f"http://[{ip}]:{PORT}/" if ":" in ip else f"http://{ip}:{PORT}/"}
 
 
 app.mount(f"/{CACHE_DIR}", StaticFiles(directory=CACHE_DIR), name="cache")
-app.mount("/videos", StaticFiles(directory=VIDEO_DIR), name="videos") # Para servir os banners
 app.mount("/", StaticFiles(directory=FILES_DIR, html=True), name="static")

@@ -1,50 +1,57 @@
-# Watch Party v1
+# Watch Party
 
-Aplicação em Python para assistir vídeos localmente com amigos.
+Aplicação Python para assistir a vídeos sincronizados com amigos. Os catálogos são origens independentes e somente leitura.
 
-## preview:
-![watch-party0.png](preview/watch-party0.png)
-![watch-party1.png](preview/watch-party1.png)
-![watch-party2.png](preview/watch-party2.png)
----
+## Instalação local
 
-## Como Usar (Host)
+1. Instale as dependências com `pip install -r requirements.txt`.
+2. Copie `save.example.json` para `save.json` e configure uma ou mais origens:
 
-1.  **Instalar dependências:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-2.  **Configurar:**
-    * Abra o arquivo `save.json` na raiz do projeto.
-    * Adicione o caminho para sua pasta de vídeos:
-        ```json
-        {
-            "port": 5467,
-            "video_dir": "/caminho/para/seus/videos",
-            "auto_scrape": false,
-            "ice_servers": [
-                { "urls": "stun:stun.l.google.com:19302" },
-                { "urls": "turn:turn.exemplo.com:3478", "username": "usuario", "credential": "senha" }
-            ]
-        }
-        ```
-        * O servidor TURN é opcional, mas ajuda a transmissão de tela a funcionar pela internet quando STUN sozinho não atravessa a rede/NAT.
-3.  **Iniciar o Servidor:**
-    ```bash
-    python src/main.py
-    ```
-4.  **Abrir o Painel do Host:**
-    * Abra `http://127.0.0.1:8000/host` no seu navegador.
-5.  **Configurar a Sala:**
-    * Copie o "Link de Convite" (que usará seu IP público IPv6/IPv4) e envie para seus amigos.
-    * Selecione o vídeo que deseja assistir e clique em "Carregar Vídeo".
-6.  **Entrar na Sala:**
-    * Clique no link para "entrar na página da sala" (ou use o link de convite).
-    * Você será o host e seus controles (play, pause, seek) irão sincronizar todos os outros.
+```json
+{
+  "port": 5467,
+  "use_cloudflare": false,
+  "sources": [
+    {
+      "id": "filmes",
+      "type": "directory",
+      "label": "Filmes",
+      "enabled": true,
+      "options": { "path": "D:/Filmes" }
+    }
+  ]
+}
+```
 
-## Como Usar (Cliente)
+O diretório deve existir e ser legível. IDs precisam ser únicos e podem conter letras, números, ponto, hífen e sublinhado. Mudanças exigem reiniciar o processo. Tipos de Source são plugins descobertos em `src/media_sources/plugins`; consulte `docs/media-source-plugins.md`.
 
-1.  Receba o link de convite do host (ex: `http://[IPv6_DO_HOST]:8000/`).
-2.  Abra o link no seu navegador.
-3.  Defina seu nome de usuário.
-4.  Aguarde o host iniciar o vídeo.
+3. Execute `python src/main.py` e abra `http://localhost:5467/host`.
+
+O playback usa um manifesto MPEG-DASH local e Shaka Player 5.2.0 hospedado pelo próprio
+WatchParty. A origem `directory` gera segmentos por pipe e os guarda apenas em RAM,
+compartilhados entre os espectadores, sem escrever derivados no disco. Copia faixas
+H.264/AAC compatíveis e usa hardware disponível para as conversões necessárias,
+com alternativa por software. `memory_cache_bytes` limita a retenção por origem
+(padrão: 268435456 bytes, 256 MiB). FFmpeg e respostas em andamento usam memória
+adicional. Sem FFmpeg/FFprobe, o catálogo continua navegável e anuncia playback
+indisponível. Consulte `docs/media-source-plugins.md` para o contrato e as opções.
+
+Vídeos aceitos: MP4, MKV, WebM e AVI. Sidecars ficam junto ao vídeo nas convenções `.subs/<nome>.<idioma>.vtt` e `.dubs/<nome>.<idioma>.mp3|aac|ogg`. Imagens usam `.previews/<nome>_poster.png`, `.previews/<nome>_thumbnail.png`, `.previews/poster.png` e `.previews/thumbnail.png`; os nomes antigos com `banner.png` continuam aceitos para compatibilidade.
+
+## Docker e TURN
+
+Copie `.env.example` para `.env`. O Compose monta `WATCHPARTY_MEDIA_DIR` em `/media` com leitura e escrita para as ferramentas de `.previews`, e usa `docker/save.json` gravável para persistir o toggle administrativo. A reprodução local funciona com a biblioteca somente leitura; escrita é necessária apenas para administrar capas. Para várias origens, adicione mounts e os respectivos caminhos internos ao arquivo JSON.
+
+Execute `docker compose up -d --build`. Configure `TURN_HOST` e um `TURN_SECRET` longo; publique as portas TURN indicadas no Compose. O modo WebRTC pode ser alterado no painel do host.
+
+## Banners administrativos
+
+O plugin `directory` pode escrever pôsteres e thumbnails diretamente em `.previews` pelo painel.
+Como alternativa administrativa em lote, use:
+
+```bash
+python make_banners.py
+python make_banners.py --source-id filmes
+```
+
+O script processa apenas origens `directory` habilitadas, continua após falhas e apresenta um resumo.

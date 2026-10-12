@@ -9,3 +9,4 @@ cinemagoer
 beautifulsoup4
 opencv-python
 aiohttp
+pytest
