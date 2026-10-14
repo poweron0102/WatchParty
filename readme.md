@@ -42,6 +42,13 @@ permite escolher entre as resoluções oferecidas pela origem; `false` limita o 
 usa a primeira representação da faixa de vídeo padrão. Áudio e legendas continuam
 disponíveis. Reinicie o programa após alterar essa configuração.
 
+Áudio e legendas são escolhas individuais, lembradas no navegador. As legendas
+começam desligadas quando ainda não há escolha salva. A seleção de legenda é
+lembrada por episódio e idioma de áudio; quando a origem informa a série e uma
+identidade equivalente da faixa, também vale para os próximos episódios. Se a
+faixa lembrada desaparecer ou houver ambiguidade, o player mantém as legendas
+desligadas e avisa. Escolher “Desativado” também é lembrado.
+
 Vídeos aceitos: MP4, MKV, WebM e AVI. Sidecars ficam junto ao vídeo nas convenções `.subs/<nome>.<idioma>.vtt` e `.dubs/<nome>.<idioma>.mp3|aac|ogg`. Imagens usam `.previews/<nome>_poster.png`, `.previews/<nome>_thumbnail.png`, `.previews/poster.png` e `.previews/thumbnail.png`; os nomes antigos com `banner.png` continuam aceitos para compatibilidade.
 
 ## Docker e TURN

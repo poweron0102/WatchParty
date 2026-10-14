@@ -62,7 +62,8 @@ class PlaybackModule:
                 if video_tracks and not any(track.kind == "video" for track in tracks):
                     raise InvalidPlaybackResource("resolução padrão não encontrada")
                 presentation = replace(presentation, tracks=tuple(tracks))
-            revision = hashlib.sha256((selection.source_id + "\0" + presentation.revision_seed).encode()).hexdigest()[:24]
+            revision = hashlib.sha256((selection.source_id + "\0" + presentation.revision_seed
+                                       + "\0" + presentation.catalog_revision).encode()).hexdigest()[:24]
             if self._active:
                 release = getattr(self._active.origin, 'release', None)
                 if release:
@@ -81,7 +82,13 @@ class PlaybackModule:
                             urls[(track.id, rep.id, identity)] = f'/playback/{playback_id}/asset/{opaque}'
                 manifest = build_mpd(presentation, urls)
                 descriptor = PlaybackDescriptor(playback_id, revision,
-                    MediaResource("manifest.mpd", "application/dash+xml", len(manifest)), presentation.title, presentation.image)
+                    MediaResource("manifest.mpd", "application/dash+xml", len(manifest)), presentation.title, presentation.image,
+                    selection.source_id, selection.media_id, presentation.preference_scope,
+                    tuple(dict(id=track.id, kind=track.kind, language=track.language,
+                               label=track.label, audio_language=track.audio_language,
+                               selection_key=track.selection_key,
+                               representation_ids=[rep.id for rep in track.representations])
+                          for track in presentation.tracks))
                 self._active = _Active(descriptor, selection, origin, presentation, manifest, resources)
                 return descriptor
 

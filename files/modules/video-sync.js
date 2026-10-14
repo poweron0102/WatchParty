@@ -14,7 +14,7 @@ function clearMedia(player) { player.muted = false; player.unload(); }
 async function applySelection(selection, player) {
     const token = ++syncState.loadToken; player.muted = false; await player.unload();
     const descriptor = await loadMediaTracks(selection); if (token !== syncState.loadToken) return false;
-    await player.load(descriptor.manifest.url); return token === syncState.loadToken;
+    await player.load(descriptor.manifest.url, descriptor); return token === syncState.loadToken;
 }
 export async function handleSyncState(state, player) {
     if (!state.video) return; syncState.isSyncing = true; syncState.currentVideo = state.video;

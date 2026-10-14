@@ -18,6 +18,10 @@ def build_mpd(presentation: OriginPresentation, resource_ids: dict[tuple[str, st
         attrs = [f'id="{html.escape(track.id)}"', f'contentType="{html.escape(track.kind)}"']
         if track.language: attrs.append(f'lang="{html.escape(track.language)}"')
         parts.append(f'<AdaptationSet {" ".join(attrs)}>')
+        if track.label:
+            parts.append(f'<Label>{html.escape(track.label)}</Label>')
+        if track.default:
+            parts.append('<Role schemeIdUri="urn:mpeg:dash:role:2011" value="main"/>')
         for rep in track.representations:
             extra = f' width="{rep.width}" height="{rep.height}"' if rep.width and rep.height else ""
             parts.append(f'<Representation id="{html.escape(rep.id)}" bandwidth="{rep.bandwidth}" codecs="{html.escape(rep.codecs)}" mimeType="{html.escape(rep.mime_type)}"{extra}>')

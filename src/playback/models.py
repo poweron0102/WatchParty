@@ -43,6 +43,8 @@ class OriginTrack:
     language: str | None = None
     label: str | None = None
     default: bool = False
+    audio_language: str | None = None
+    selection_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,8 @@ class OriginPresentation:
     revision_seed: str
     image: MediaResource | None = None
     canonical_video_representation: str | None = None
+    catalog_revision: str = ""
+    preference_scope: str | None = None
 
 
 @dataclass(frozen=True)
@@ -101,6 +105,10 @@ class PlaybackDescriptor:
     manifest: MediaResource
     title: str
     image: MediaResource | None = None
+    source_id: str | None = None
+    media_id: str | None = None
+    preference_scope: str | None = None
+    tracks: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
