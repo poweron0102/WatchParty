@@ -29,6 +29,7 @@ from playback.models import (InvalidPlaybackResource, MaterializationTimeout, Pl
                              PlaybackNotFound, PlaybackPaused)
 
 PLAYBACK = PlaybackModule(MEDIA_SOURCES.playback_origins(),
+                          allow_resolution_selection=PLAYBACK_CONFIG["allow_resolution_selection"],
                           wait_timeout=PLAYBACK_CONFIG["segment_wait_timeout_seconds"])
 
 

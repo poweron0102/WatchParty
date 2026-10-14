@@ -36,6 +36,12 @@ com alternativa por software. `memory_cache_bytes` limita a retenção por orige
 adicional. Sem FFmpeg/FFprobe, o catálogo continua navegável e anuncia playback
 indisponível. Consulte `docs/media-source-plugins.md` para o contrato e as opções.
 
+Em `save.json`, configure `playback.allow_resolution_selection`: `true` (padrão)
+permite escolher entre as resoluções oferecidas pela origem; `false` limita o player
+à resolução padrão de download. Para origens sem resolução de download definida,
+usa a primeira representação da faixa de vídeo padrão. Áudio e legendas continuam
+disponíveis. Reinicie o programa após alterar essa configuração.
+
 Vídeos aceitos: MP4, MKV, WebM e AVI. Sidecars ficam junto ao vídeo nas convenções `.subs/<nome>.<idioma>.vtt` e `.dubs/<nome>.<idioma>.mp3|aac|ogg`. Imagens usam `.previews/<nome>_poster.png`, `.previews/<nome>_thumbnail.png`, `.previews/poster.png` e `.previews/thumbnail.png`; os nomes antigos com `banner.png` continuam aceitos para compatibilidade.
 
 ## Docker e TURN

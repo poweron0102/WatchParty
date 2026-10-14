@@ -10,6 +10,7 @@ os.makedirs("files", exist_ok=True)
 os.makedirs("cache", exist_ok=True)
 SAVE_FILE, CLOUDFLARE_FILE, CACHE_DIR, FILES_DIR = "save.json", "cloudflare.json", "cache", "files"
 DEFAULT_PLAYBACK = {
+    "allow_resolution_selection": True,
     "buffer_ahead_seconds": 30, "buffer_behind_seconds": 30,
     "segment_wait_timeout_seconds": 30, "soft_sync_drift_seconds": 0.25,
     "hard_sync_drift_seconds": 2.0, "inactive_playback_grace_seconds": 0,
@@ -43,6 +44,10 @@ if not isinstance(raw_playback, dict) or set(raw_playback) - set(DEFAULT_PLAYBAC
     raise RuntimeError("Configuração playback inválida")
 PLAYBACK_CONFIG.update(raw_playback)
 for key, value in PLAYBACK_CONFIG.items():
+    if key == "allow_resolution_selection":
+        if not isinstance(value, bool):
+            raise RuntimeError("allow_resolution_selection deve ser booleano")
+        continue
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0 or (key != "inactive_playback_grace_seconds" and value == 0):
         raise RuntimeError(f"Configuração playback inválida em {key}")
 if PLAYBACK_CONFIG["inactive_playback_grace_seconds"] != 0:

@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -33,6 +34,44 @@ class FakeOrigin:
 
 
 class PlaybackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_resolution_selection_policy(self):
+        base = await self.origin.inspect("media")
+        low = base.tracks[0].representations[0]
+        canonical = replace(low, id="download", width=1920, height=1080)
+        audio = OriginTrack("audio", "audio", (replace(low, id="audio", mime_type="audio/mp4"),))
+        text = OriginTrack("text", "text", (replace(low, id="text", mime_type="text/vtt", segments=()),))
+        async def inspect(media_id):
+            return replace(base, tracks=(replace(base.tracks[0], representations=(low, canonical)), audio, text),
+                           canonical_video_representation="download")
+        self.origin.inspect = inspect
+        for enabled, expected in ((True, {"v1", "download"}), (False, {"download"})):
+            with self.subTest(enabled=enabled):
+                module = PlaybackModule({"source": self.origin}, allow_resolution_selection=enabled)
+                descriptor = await module.select(PlaybackSelection("source", "media"))
+                opened = await module.open(descriptor.playback_id, "manifest.mpd", ResourceRequest())
+                body = b"".join([chunk async for chunk in opened.chunks])
+                video = module._active.presentation.tracks[0]
+                self.assertEqual({rep.id for rep in video.representations}, expected)
+                self.assertEqual(module._active.presentation.tracks[1:], (audio, text))
+                self.assertIn(b'id="download"', body)
+                self.assertEqual(b'id="v1"' in body, enabled)
+                self.assertEqual({d.representation_id for d in module._active.resources.values()},
+                                 expected | {"audio", "text"})
+                await module.aclose()
+
+    async def test_fixed_resolution_without_canonical_uses_default_track(self):
+        base = await self.origin.inspect("media")
+        first = base.tracks[0]
+        default = replace(first, id="default", default=True,
+                          representations=(replace(first.representations[0], id="default-video"),))
+        async def inspect(media_id):
+            return replace(base, tracks=(first, default))
+        self.origin.inspect = inspect
+        module = PlaybackModule({"source": self.origin}, allow_resolution_selection=False)
+        await module.select(PlaybackSelection("source", "media"))
+        self.assertEqual(module._active.presentation.tracks, (default,))
+        await module.aclose()
+
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.origin = FakeOrigin(self.temp.name)
         self.module = PlaybackModule({"source": self.origin}, wait_timeout=1)

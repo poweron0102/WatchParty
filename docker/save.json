@@ -1,1 +1,1 @@
-{"port":5467,"use_cloudflare":false,"sources":[{"id":"local","type":"directory","label":"Mídia local","options":{"path":"/media"}}]}
+{"port":5467,"use_cloudflare":false,"playback":{"allow_resolution_selection":true},"sources":[{"id":"local","type":"directory","label":"Mídia local","options":{"path":"/media"}}]}

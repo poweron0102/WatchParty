@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import logging
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from media_sources.models import MediaResource, OpenedResource
 from .manifest import build_mpd
@@ -27,10 +27,11 @@ class _Active:
 
 class PlaybackModule:
     def __init__(self, origins: dict[str, PlaybackOrigin], max_segment_downloads: int = 4,
-                 wait_timeout: float = 30):
+                 wait_timeout: float = 30, allow_resolution_selection: bool = True):
         self._origins = origins
         self._planner = MaterializationPlanner(None, max_segment_downloads)
         self._timeout = wait_timeout
+        self._allow_resolution_selection = allow_resolution_selection
         self._active: _Active | None = None
         self._expired: set[str] = set()
         self._background: set[asyncio.Task] = set()
@@ -44,6 +45,23 @@ class PlaybackModule:
             try: origin = self._origins[selection.source_id]
             except KeyError as exc: raise PlaybackNotFound("origem não encontrada") from exc
             presentation = await origin.inspect(selection.media_id)
+            if not self._allow_resolution_selection:
+                video_tracks = [track for track in presentation.tracks if track.kind == "video"]
+                canonical = presentation.canonical_video_representation
+                if not canonical and video_tracks:
+                    default_track = next((track for track in video_tracks if track.default), video_tracks[0])
+                    canonical = default_track.representations[0].id
+                tracks = []
+                for track in presentation.tracks:
+                    if track.kind == "video":
+                        representations = tuple(rep for rep in track.representations if rep.id == canonical)
+                        if not representations:
+                            continue
+                        track = replace(track, representations=representations)
+                    tracks.append(track)
+                if video_tracks and not any(track.kind == "video" for track in tracks):
+                    raise InvalidPlaybackResource("resolução padrão não encontrada")
+                presentation = replace(presentation, tracks=tuple(tracks))
             revision = hashlib.sha256((selection.source_id + "\0" + presentation.revision_seed).encode()).hexdigest()[:24]
             if self._active:
                 release = getattr(self._active.origin, 'release', None)

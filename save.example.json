@@ -3,6 +3,7 @@
     "use_cloudflare": false,
     "allow_remote_host_admin": false,
     "playback": {
+        "allow_resolution_selection": true,
         "buffer_ahead_seconds": 30,
         "buffer_behind_seconds": 30,
         "segment_wait_timeout_seconds": 30,
