@@ -4,7 +4,7 @@ import { setSocketIdGetter, closePeerConnection, handleAudioSignal } from './mod
 import { closeScreenShareConnection, createScreenShareConnection, getScreenShareSessionId,
          isScreenShareVideo, setScreenShareSession, stopScreenShare, getScreenStream,
          handleScreenSignal } from './modules/screen-share.js';
-import { setupDubListeners, handleSyncState, handleSyncEvent, handleForceSync } from './modules/video-sync.js';
+import { setupDubListeners, handleSyncState, handleSyncEvent, handleForceSync, syncState } from './modules/video-sync.js';
 import { updateStatusIndicator, setupHostUI } from './modules/host-ui.js';
 import { PlayerController } from './modules/player-controller.js';
 
@@ -106,7 +106,7 @@ socket.on('force_sync', (data) => {
 });
 
 socket.on('get_host_time', (callback) => {
-    if (isHostRef.value) callback({ time: player.currentTime, paused: player.paused });
+    if (isHostRef.value) callback(syncState.loadingState || { time: player.currentTime, paused: player.paused });
 });
 
 socket.on('peer_disconnected', ({ sid }) => {

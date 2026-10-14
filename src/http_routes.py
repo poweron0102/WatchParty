@@ -68,12 +68,20 @@ def _serialize_entry(source_id, item):
     data["entity_kind"] = _entity_kind(item)
     data["source_id"] = source_id
     data["favorited"] = host_store.is_favorite(source_id, item.id, data["entity_kind"])
+    _attach_history(source_id, data)
     return data
 
 
 def _snapshot_entry(source_id, item):
     return {field: _serialize_resource(source_id, getattr(item, field))
             for field in ("image", "poster", "thumbnail")}
+
+
+def _attach_history(source_id, entry, history=None):
+    if history is None:
+        history = host_store.resume(source_id, entry["id"], entry["entity_kind"])
+    if history is not None:
+        entry["history"] = {key: history[key] for key in ("position", "duration", "completed", "last_played_at")}
 
 
 def _local_entry(source_id, row, *, favorite=False, history=None):
@@ -85,8 +93,7 @@ def _local_entry(source_id, row, *, favorite=False, history=None):
              "media_kind": None if is_collection else "video", "entity_kind": kind, "source_id": source_id,
              "image": snapshot.get("image"), "poster": snapshot.get("poster"),
              "thumbnail": snapshot.get("thumbnail"), "favorited": favorite}
-    if history is not None:
-        value["history"] = {key: history[key] for key in ("position", "duration", "completed", "last_played_at")}
+    _attach_history(source_id, value, history)
     return value
 
 

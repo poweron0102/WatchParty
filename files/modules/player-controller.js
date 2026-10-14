@@ -29,10 +29,10 @@ export class PlayerController {
             retryParameters: { maxAttempts: 4, baseDelay: 1000, backoffFactor: 2, timeout: 45000, stallTimeout: 0 },
         }, abr: { enabled: true } });
     }
-    async load(url, context = {}) {
+    async load(url, context = {}, startTime = null) {
         this.media.srcObject = null; await this.ready;
         const generation = this.subtitles.begin(context);
-        await this.engine.load(url);
+        await this.engine.load(url, startTime);
         await this.subtitles.loaded(generation);
     }
     async unload() { this.subtitles.unload(); await this.ready; await this.engine.unload(); this.media.removeAttribute('src'); }

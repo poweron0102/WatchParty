@@ -37,9 +37,11 @@ export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIn
         if (isHostRef.value && !syncState.isSyncing) {
             socket.emit('host_sync', { type: 'play', time: player.currentTime });
             clearInterval(checkpointTimer);
-            checkpointTimer = setInterval(() => socket.emit('host_sync', {
-                type: 'checkpoint', time: player.currentTime, duration: player.media.duration
-            }), 15000);
+            checkpointTimer = setInterval(() => {
+                if (!syncState.isSyncing) socket.emit('host_sync', {
+                    type: 'checkpoint', time: player.currentTime, duration: player.media.duration
+                });
+            }, 15000);
             return;
         }
 
@@ -56,10 +58,10 @@ export function setupHostUI({ socket, player, dubPlayer, dubDelayInput, statusIn
 
     player.on('pause', () => {
         if (isScreenShareActive()) return;
+        clearInterval(checkpointTimer); checkpointTimer = null;
 
         if (isHostRef.value && !syncState.isSyncing) {
             socket.emit('host_sync', { type: 'pause', time: player.currentTime });
-            clearInterval(checkpointTimer); checkpointTimer = null;
             return;
         }
 

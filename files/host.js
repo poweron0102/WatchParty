@@ -150,12 +150,21 @@ function card(item) {
     body.append(indicator, image);
 
     if (item.history || item.cache) {
+        const history = item.history;
+        const value = history?.completed ? 1 : history
+            ? (history.duration ? history.position / history.duration : 0)
+            : item.cache.coverage || 0;
+        const percent = Math.max(0, Math.min(1, Number(value) || 0)) * 100;
         const progress = document.createElement('div');
         progress.className = 'media-progress';
-        const value = item.history?.duration ? item.history.position / item.history.duration
-            : item.cache?.coverage || 0;
+        progress.setAttribute('role', 'progressbar');
+        progress.setAttribute('aria-label', history ? 'Progresso assistido' : 'Disponível em cache');
+        progress.setAttribute('aria-valuemin', '0');
+        progress.setAttribute('aria-valuemax', '100');
+        progress.setAttribute('aria-valuenow', String(Math.round(percent)));
+        progress.title = history ? `${Math.round(percent)}% assistido` : `${Math.round(percent)}% em cache`;
         const fill = document.createElement('span');
-        fill.style.width = `${Math.max(0, Math.min(1, Number(value) || 0)) * 100}%`;
+        fill.style.width = `${percent}%`;
         progress.appendChild(fill);
         body.appendChild(progress);
     }
